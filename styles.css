@@ -1,4 +1,9 @@
 /* Clara · estilos. Mobile first: primero el celular, después la compu. */
+[hidden] { display: none !important; }
+@media (max-width: 899px) {
+  .topbar { padding-top: max(6px, env(safe-area-inset-top, 0px)); }
+  .sidebar { padding-top: max(18px, env(safe-area-inset-top, 0px)); }
+}
 :root {
   --ink: #15262f; --ink2: #3c5059; --muted: #6f8088; --line: #e4eaea; --line2: #eef2f2;
   --bg: #f5f7f6; --card: #fff; --teal: #0a7d76; --teal-d: #076560; --teal-l: #e2f2ef; --teal-ll: #f1f9f7;
@@ -543,4 +548,125 @@ body.overlay-lock { overflow: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar, .sheet, .sheet-bg, .toast, .toggle, .toggle::after { transition: none !important; animation: none !important; }
+}
+
+/* ---------- Obras sociales: resumen y lista de prestaciones ---------- */
+:root { --muted: #5d7078; }
+.os-overview, .os-summary, .os-tabs, .os-toolbar, .os-item, .os-item-head,
+.os-item-meta, .os-item-status, .os-details, .os-issues, .os-rules { min-width: 0; }
+.os-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.os-overview > * { min-width: 0; }
+.os-overview { margin: 14px 0; }
+.os-overview > div { padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.os-overview strong { display: block; font: 800 clamp(17px, 3vw, 23px) var(--display); margin-top: 4px; overflow-wrap: anywhere; }
+.os-demo { font-size: 12px; margin: 0 0 12px; }
+.agenda-cancelled { margin-top: 12px; }
+.agenda-cancelled > summary { padding: 12px 16px; min-height: 44px; cursor: pointer; font-weight: 700; color: var(--muted); }
+.activity-summary > summary { padding: 14px 16px; min-height: 44px; cursor: pointer; font-weight: 700; }
+@media (max-width: 899px) {
+  .today-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-kpis .kpi { padding: 12px; }
+  .today-kpis .k-num { font-size: 20px; overflow-wrap: anywhere; }
+  .today-kpis .k-top { font-size: 12px; }
+  .today-kpis .k-sub { font-size: 11.5px; }
+}
+.input-like { padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); }
+.os-tabs { margin-bottom: 14px; }
+.os-summary { padding: 14px; margin-bottom: 12px; justify-content: space-between; }
+.os-summary h2 { font-size: 15px; }
+.os-summary p { margin: 4px 0 0; }
+.os-list { margin-bottom: 12px; }
+.os-list { display: grid; gap: 10px; }
+.os-list .os-item + .os-item { margin-top: 0; }
+@media (min-width: 1100px) {
+  .os-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  body.dock-open .os-list { grid-template-columns: minmax(0, 1fr); }
+}
+.os-item-head h3 { font-size: 15px; }
+.os-item-meta { margin: 0; }
+.os-rules > summary span:first-child { flex: 1; min-width: 0; }
+.os-overview .card { padding: 12px; }
+.os-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; max-width: 100%; gap: 4px; overflow: visible; }
+.os-tabs > * { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.os-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, auto); align-items: end; gap: 8px; }
+.os-toolbar .field { min-width: 0; margin: 0; }
+.os-toolbar input, .os-toolbar select { min-width: 0; max-width: 100%; }
+.os-summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.os-item { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--card); box-shadow: var(--shadow); }
+.os-item + .os-item { margin-top: 8px; }
+.os-item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.os-item-head > :first-child { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.os-item-head .money { flex: 0 1 auto; white-space: normal; overflow-wrap: anywhere; text-align: right; }
+.os-item-meta { color: var(--ink2); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.os-item-status { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.os-details { border-top: 1px solid var(--line2); padding-top: 8px; }
+.os-details > summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--teal-d); font-weight: 700; cursor: pointer; list-style: none; }
+.os-details > summary::-webkit-details-marker { display: none; }
+.os-details > summary::after { content: '⌄'; font-size: 16px; transition: transform .15s ease; }
+.os-details[open] > summary::after { transform: rotate(180deg); }
+.os-details > :not(summary) { min-width: 0; }
+.os-issues { display: grid; gap: 8px; margin-top: 8px; }
+.os-issues > * { min-width: 0; }
+.os-issues > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.os-issues > div > :first-child { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.os-issues button { flex: 0 1 auto; min-height: 44px; white-space: normal; }
+.os-rules { padding: 0; overflow: hidden; }
+.os-rules > summary { min-height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; cursor: pointer; list-style: none; font-weight: 800; }
+.os-rules > summary::-webkit-details-marker { display: none; }
+.os-rules > summary::after { content: '⌄'; color: var(--teal); font-size: 17px; }
+.os-rules[open] > summary { border-bottom: 1px solid var(--line); }
+.os-rules[open] > :not(summary) { margin: 12px 14px; }
+
+/* El formulario de las sheets y del simulador sigue la altura visible del teclado. */
+.sheet-head, .sheet-foot { flex-shrink: 0; }
+.ph-msgs { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.ph-foot { flex: 0 0 auto; }
+.ph-foot input { min-width: 0; }
+@media (max-width: 1179px) {
+  .sheet { top: auto; bottom: var(--keyboard-inset, 0px); }
+  .sheet-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .phone-dock.open { top: var(--visual-top, 0px); bottom: auto; height: var(--visual-height, 100dvh); }
+  .phone-dock.open .phone { top: 0; bottom: auto; height: var(--visual-height, 100dvh); }
+}
+@media (max-width: 899px) {
+  .sheet { max-height: min(92dvh, var(--visual-height, 100dvh)); }
+}
+@media (min-width: 900px) and (max-width: 1179px) {
+  .sheet { top: var(--visual-top, 0px); max-height: var(--visual-height, 100dvh); }
+  body.dock-open .phone-dock.open { top: var(--visual-top, 0px); bottom: auto; height: var(--visual-height, 100dvh); }
+  body.dock-open .phone-dock.open .phone { top: 14px; bottom: auto; height: calc(var(--visual-height, 100dvh) - 28px); }
+}
+
+/* Navegación inferior compacta; el FAB permanece dentro de un área reservada. */
+.bottomnav { padding-top: 4px; padding-bottom: calc(4px + var(--safe-b)); }
+.bottomnav button { min-height: 44px; padding: 3px 0; color: #5e7078; }
+.bottomnav button.active { color: var(--teal-d); }
+.fab { width: 46px; height: 46px; right: 12px; bottom: calc(68px + var(--safe-b)); border-radius: 15px; }
+.fab svg { width: 22px; height: 22px; }
+@media (max-width: 899px) {
+  .content { padding-bottom: calc(84px + var(--safe-b)); }
+  .os-tabs > * { min-height: 44px; padding: 5px 7px; font-size: 12px; line-height: 1.25; }
+  .os-tabs > button { display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink2); font-weight: 700; }
+  .os-tabs > button.on { background: var(--teal-l); border-color: #c9e7e1; color: var(--teal-d); }
+  .os-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .os-toolbar select { width: 100%; }
+  .os-item-head { align-items: flex-start; }
+  .os-item-head .money { text-align: left; }
+  .os-details summary, .os-rules summary { min-height: 44px; }
+  .bottomnav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .bottomnav button { font-size: 10.5px; }
+  .fab { width: 44px; height: 44px; bottom: calc(70px + var(--safe-b)); }
+}
+@media (max-width: 430px) {
+  .two { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 380px) {
+  .content { padding-bottom: calc(84px + var(--safe-b)); }
+  .os-overview { gap: 7px; }
+  .os-overview .card { padding: 10px; }
+  .os-tabs { gap: 3px; }
+  .os-tabs > * { padding-right: 4px; padding-left: 4px; font-size: 11.5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .os-details > summary::after { transition: none; }
 }

@@ -11,8 +11,10 @@ Es un prototipo navegable de una clínica dental con agentes de IA. Sirve para m
   - El turno aparece en la agenda al instante. En la compu, el teléfono queda al costado del panel.
   - Arriba del teléfono podés elegir quién escribe: un paciente nuevo o uno ya cargado.
 - **Bandeja de WhatsApp de la clínica.** Muestra qué agente respondió cada mensaje. Recepción puede tomar la conversación y devolvérsela a Clara.
-- **Agenda.** En el celular es una lista por día. En la compu es una grilla por profesional, con vista de semana.
+- **Agenda.** En el celular es una lista por día. En la compu es una grilla por profesional, con vista de semana. Permite crear, reprogramar y cancelar con confirmación; al guardar vuelve a comprobar la disponibilidad del profesional y del paciente.
 - **Obras sociales.**
+  - Búsqueda por paciente, cobertura o prestación; filtros por estado y detalles desplegables.
+  - Lotes de demostración con las prestaciones listas, sin incluir las que tienen faltantes.
   - Revisión con IA antes de presentar: faltan firmas, bonos, radiografías o autorizaciones, o se supera la frecuencia.
   - Débitos ordenados por motivo, con el borrador del reclamo.
 - **Recordatorios.** Se envían desde "Hoy". Algunos pacientes confirman solos y otro pide cambiar el turno.
@@ -28,7 +30,7 @@ Es un prototipo navegable de una clínica dental con agentes de IA. Sirve para m
 | `agent.js` | Motor de conversación simulado: entiende el mensaje, busca horarios, agenda y deriva |
 | `app.js` | Estado, pantallas, simulador y agentes que se disparan desde el panel |
 
-Los cambios que hace quien prueba la demo se guardan en su navegador (localStorage) y se reinician cada día. También se pueden reiniciar desde Configuración.
+Los cambios que hace quien prueba la demo se guardan en su navegador (localStorage) hasta que se reinicie la demo desde Configuración o se borren los datos del sitio. Reiniciar pide confirmación. No uses datos reales de pacientes.
 
 ## Cómo pasarlo a real (resumen)
 
@@ -36,6 +38,10 @@ Los cambios que hace quien prueba la demo se guardan en su navegador (localStora
 2. Guardar los datos de cada clínica por separado, por ejemplo en Supabase.
 3. Cargar las normas reales de 3 a 5 obras sociales por clínica.
 4. Revisión legal: datos de salud (Ley 25.326), registro ante la AAIP y contrato de tratamiento de datos con cada clínica.
+
+## Verificaciones locales
+
+Sin instalar dependencias: `node tests/appointments.cjs` prueba creación, disponibilidad al guardar, fechas, profesionales y reprogramación. `node --check app.js` comprueba la sintaxis. Las pruebas de lógica usan un entorno de interfaz simulado; la adaptación visual y el teclado se revisan en el navegador.
 
 ## Cómo colaborar
 
