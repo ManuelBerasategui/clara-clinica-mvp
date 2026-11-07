@@ -303,11 +303,13 @@
     obras: ['Obras sociales', 'shield'], finanzas: ['Finanzas', 'wallet'], agentes: ['Agentes IA', 'bot'], config: ['Configuración', 'settings']
   };
   function go(p, push = true) {
+    setMenu(false, false);
     if (!PAGES[p]) p = 'hoy';
     UI.page = p;
     if (push && location.hash !== '#' + p) history.pushState(null, '', '#' + p);
     closeSheet(true);
     render(); window.scrollTo(0, 0);
+    focusViewHeading();
   }
   window.addEventListener('popstate', () => go((location.hash || '#hoy').slice(1), false));
 
@@ -322,6 +324,9 @@
     $('#crumb').textContent = PAGES[UI.page][0];
     document.title = `${PAGES[UI.page][0]} · Clara`;
     $('.fab').classList.toggle('hidden', !['hoy', 'agenda', 'pacientes'].includes(UI.page));
+    document.querySelectorAll('#sidenav button, #bottomnav button').forEach(button => {
+      if (button.classList.contains('active')) button.setAttribute('aria-current', 'page');
+    });
   }
 
   /* ---------- Piezas comunes ---------- */
@@ -610,6 +615,8 @@
     const v = $('#view');
     v.innerHTML = RENDER[UI.page]();
     hydrate(v);
+    enhanceContent(v);
+    syncOverlays();
     if (UI.page === 'whatsapp') { const m = $('#conv-msgs'); if (m) m.scrollTop = m.scrollHeight; }
     S.activity.forEach(x => { x.fresh = false; });
   }
@@ -640,6 +647,7 @@
     $('#ph-status').textContent = c && c.mode === 'human' ? 'en línea · te atiende recepción' : (c && UI.typing[c.id] ? 'escribiendo…' : 'en línea · responde Clara (IA)');
   }
   function openPhone(say) {
+    if (!$('#phonedock').classList.contains('open')) returnFocus.phone = document.activeElement;
     $('#phonedock').classList.add('open'); $('#phonedock').setAttribute('aria-hidden', 'false');
     document.body.classList.add('dock-open');
     $('#ph-persona').innerHTML = D.personas.map(p => `<option value="${p.id}" ${p.id === S.persona ? 'selected' : ''}>${p.label}${p.patientId ? ' (' + patient(p.patientId).cob + ')' : ''}</option>`).join('');
@@ -649,9 +657,15 @@
     if (UI.page === 'hoy') { const y = window.scrollY; render(); window.scrollTo(0, y); }
     if (matchMedia('(min-width: 900px)').matches && UI.page !== 'agenda' && UI.page !== 'whatsapp' && !say) go('agenda');
     if (say) setTimeout(() => sendFromPhone(say), 250);
-    else if (matchMedia('(min-width: 900px)').matches) setTimeout(() => $('#ph-input').focus(), 60);
+    syncOverlays();
+    if (!say) $('#ph-input').focus({ preventScroll: true });
   }
-  function closePhone() { $('#phonedock').classList.remove('open'); $('#phonedock').setAttribute('aria-hidden', 'true'); document.body.classList.remove('dock-open'); }
+  function closePhone() {
+    const wasOpen = $('#phonedock').classList.contains('open');
+    $('#phonedock').classList.remove('open'); $('#phonedock').setAttribute('aria-hidden', 'true'); document.body.classList.remove('dock-open');
+    syncOverlays();
+    if (wasOpen) restoreFocus('phone');
+  }
   function sendFromPhone(text) {
     text = (text || '').trim(); if (!text) return;
     const c = simConv();
@@ -661,9 +675,12 @@
 
   /* ---------- Hojas (detalle y formularios) ---------- */
   function openSheet(title, bodyFn, footFn, opts = {}) {
+    if (!UI.sheet) returnFocus.sheet = document.activeElement;
     UI.sheet = { title, bodyFn, footFn, refresh: () => paintSheet() };
     paintSheet();
     $('#sheet').classList.add('open'); $('#sheetbg').classList.add('open');
+    syncOverlays();
+    ($('#sheet .sheet-body').querySelector('input,select,textarea') || $('#sheet [data-act="sheet-close"]'))?.focus({ preventScroll: true });
     if (!opts.keepScroll) $('#sheet .sheet-body').scrollTop = 0;
   }
   function paintSheet() {
@@ -672,10 +689,20 @@
     const ae = document.activeElement; if (ae && body.contains(ae) && /INPUT|TEXTAREA/.test(ae.tagName) && !UI.sheet.force) return;
     UI.sheet.force = false;
     const foot = UI.sheet.footFn ? UI.sheet.footFn() : '';
-    body.innerHTML = `<div class="sheet-head"><h2>${UI.sheet.title}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Cerrar">${ic('x')}</button></div><div class="sheet-body">${UI.sheet.bodyFn()}</div>${foot ? `<div class="sheet-foot">${foot}</div>` : ''}`;
+    const focusedId = ae && body.contains(ae) ? ae.id : null;
+    const focusedAction = ae && body.contains(ae) ? ae.dataset.act : null;
+    body.innerHTML = `<div class="sheet-head"><h2 id="sheet-title">${UI.sheet.title}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Cerrar">${ic('x')}</button></div><div class="sheet-body">${UI.sheet.bodyFn()}</div>${foot ? `<div class="sheet-foot">${foot}</div>` : ''}`;
+    enhanceContent(body);
+    if (focusedId) document.getElementById(focusedId)?.focus({ preventScroll: true });
+    else if (focusedAction) [...body.querySelectorAll('[data-act]')].find(x => x.dataset.act === focusedAction)?.focus({ preventScroll: true });
     $('#sheet-inner .sheet-body').scrollTop = top;
   }
-  function closeSheet(silent) { UI.sheet = null; $('#sheet').classList.remove('open'); $('#sheetbg').classList.remove('open'); }
+  function closeSheet(silent) {
+    const wasOpen = !!UI.sheet;
+    UI.sheet = null; $('#sheet').classList.remove('open'); $('#sheetbg').classList.remove('open');
+    syncOverlays();
+    if (wasOpen && !silent) restoreFocus('sheet');
+  }
 
   function showAppt(id) {
     const a = appt(id); if (!a) return;
@@ -851,6 +878,8 @@
     const el = e.target.closest('[data-act]'); if (!el) return;
     const d = el.dataset, act = d.act;
     switch (act) {
+      case 'menu-open': setMenu(true); break;
+      case 'menu-close': setMenu(false); break;
       case 'go': go(d.page); break;
       case 'more':
         openSheet('Más', () => `<div class="list card">${['obras', 'agentes', 'finanzas', 'config'].map(p => `<button class="row tap" data-act="go" data-page="${p}">${ic(PAGES[p][1])}<div class="grow"><div class="title">${PAGES[p][0]}</div></div>${ic('chevR', 'sm')}</button>`).join('')}</div><button class="btn block" style="margin-top:12px;background:#25d366;color:#063d1d" data-act="phone-open">${ic('phone')}Probar WhatsApp como paciente</button>`);
@@ -935,7 +964,95 @@
       renderPhone(); renderNav();
     }
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (UI.sheet) closeSheet(); else closePhone(); } });
+  document.addEventListener('keydown', e => {
+    const overlay = UI.sheet ? $('#sheet') : document.body.classList.contains('menu-open') ? $('.sidebar') :
+      $('#phonedock').classList.contains('open') && phoneIsModal.matches ? $('.phone') : null;
+    if (e.key === 'Escape') {
+      if (UI.sheet) closeSheet();
+      else if (document.body.classList.contains('menu-open')) setMenu(false);
+      else closePhone();
+    }
+    if (e.key !== 'Tab' || !overlay) return;
+    const controls = [...overlay.querySelectorAll('button,input,select,textarea,a[href],[tabindex="0"]')]
+      .filter(x => !x.disabled && x.getClientRects().length);
+    const first = controls[0], last = controls[controls.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) {
+      e.preventDefault(); last?.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !overlay.contains(document.activeElement))) {
+      e.preventDefault(); first?.focus();
+    }
+  });
+
+  /* ---------- Accesibilidad de navegación, hojas y tablas ---------- */
+  const returnFocus = {};
+  const mobileMenu = matchMedia('(max-width: 899px)');
+  const phoneIsModal = matchMedia('(max-width: 1179px)');
+  function focusViewHeading() {
+    const heading = $('#view h1');
+    if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+  }
+  function restoreFocus(kind) {
+    const target = returnFocus[kind];
+    if (target?.isConnected && !target.closest('[inert]') && target.getClientRects().length) target.focus({ preventScroll: true });
+    else focusViewHeading();
+  }
+  function setMenu(open, restore = true) {
+    open = open && mobileMenu.matches;
+    const wasOpen = document.body.classList.contains('menu-open');
+    document.body.classList.toggle('menu-open', open);
+    $('.menu-toggle').setAttribute('aria-expanded', String(open));
+    syncOverlays();
+    if (open) $('.menu-close').focus({ preventScroll: true });
+    else if (wasOpen && restore) $('.menu-toggle').focus({ preventScroll: true });
+  }
+  function syncOverlays() {
+    const sheet = !!UI.sheet;
+    const menu = document.body.classList.contains('menu-open');
+    const phoneOpen = $('#phonedock').classList.contains('open');
+    const phoneModal = phoneOpen && phoneIsModal.matches;
+    $('.app').inert = sheet || phoneModal;
+    $('main').inert = menu;
+    $('.sidebar').inert = mobileMenu.matches && !menu;
+    $('#bottomnav').inert = sheet || menu || phoneModal;
+    $('.fab').inert = sheet || menu || phoneModal;
+    $('#phonedock').inert = !phoneOpen || sheet || menu;
+    $('#sheet').inert = !sheet;
+    document.body.classList.toggle('overlay-lock', sheet || menu || phoneModal);
+    if (menu) { $('.sidebar').setAttribute('role', 'dialog'); $('.sidebar').setAttribute('aria-modal', 'true'); }
+    else { $('.sidebar').removeAttribute('role'); $('.sidebar').removeAttribute('aria-modal'); }
+    if (phoneModal) $('.phone').setAttribute('aria-modal', 'true');
+    else $('.phone').removeAttribute('aria-modal');
+  }
+  function enhanceContent(root) {
+    root.querySelectorAll('.field').forEach((field, index) => {
+      const label = field.querySelector('label'), control = field.querySelector('input,select,textarea');
+      if (!label || !control) return;
+      control.id ||= (root.closest('#sheet') ? 'sheet-field-' : 'view-field-') + (control.dataset.f || index);
+      label.htmlFor = control.id;
+    });
+    root.querySelectorAll('.toggle').forEach(button => button.setAttribute('aria-pressed', String(button.classList.contains('on'))));
+    root.querySelectorAll('.seg button,.fchip,.daychip').forEach(button => button.setAttribute('aria-pressed', String(button.classList.contains('on'))));
+    const staffInput = root.querySelector('#staffinput');
+    if (staffInput) staffInput.setAttribute('aria-label', 'Mensaje de recepción');
+    root.querySelectorAll('.tablewrap').forEach((wrapper, index) => {
+      const overflow = wrapper.scrollWidth > wrapper.clientWidth + 1;
+      wrapper.tabIndex = overflow ? 0 : -1;
+      wrapper.setAttribute('role', 'region');
+      wrapper.setAttribute('aria-label', 'Tabla de datos de ' + PAGES[UI.page][0]);
+      let hint = wrapper.previousElementSibling;
+      if (!hint?.classList.contains('table-hint')) {
+        hint = document.createElement('p'); hint.className = 'table-hint';
+        hint.id = 'table-hint-' + UI.page + '-' + index;
+        hint.textContent = 'Deslizá para ver todas las columnas. Con teclado, usá las flechas.';
+        wrapper.before(hint);
+      }
+      hint.hidden = !overflow;
+      wrapper.setAttribute('aria-describedby', hint.id);
+    });
+  }
+  mobileMenu.addEventListener('change', () => setMenu(false, false));
+  phoneIsModal.addEventListener('change', syncOverlays);
+  window.addEventListener('resize', () => { enhanceContent($('#view')); if (UI.sheet) enhanceContent($('#sheet-inner')); });
 
   function saveAppt() {
     const f = UI.form;
