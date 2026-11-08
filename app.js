@@ -72,11 +72,17 @@
   /* ---------- Estado ---------- */
   const LS = 'clara-demo-v3';
   let S;
-  const UI = { page: 'hoy', agendaDay: null, agendaView: 'dia', agendaProf: 'all', inboxConv: null, highlight: null, typing: {}, osTab: 'pre', form: null, pendingToasts: [], checking: false, sheet: null };
+  const UI = { page: 'hoy', agendaDay: null, agendaView: 'dia', agendaProf: 'all', inboxConv: null, highlight: null, typing: {}, osTab: 'pre', osQuery: '', osFilter: 'all', patientQuery: '', form: null, pendingToasts: [], checking: false, checkingDebitos: false, sheet: null };
 
-  function save() { try { localStorage.setItem(LS, JSON.stringify(S)); } catch (e) { /* sin almacenamiento: la demo sigue en memoria */ } }
+  let storageWarningShown = false;
+  function save() {
+    try { localStorage.setItem(LS, JSON.stringify(S)); }
+    catch (e) {
+      if (!storageWarningShown) { storageWarningShown = true; setTimeout(() => toast({ title: 'Guardado temporal', text: 'El navegador no permite guardar. Los cambios se perderán al cerrar la demo.', warn: true }), 0); }
+    }
+  }
   function load() {
-    try { const raw = localStorage.getItem(LS); if (raw) { const s = JSON.parse(raw); if (s && s.v === 3 && s.seededFor === tk()) return s; } } catch (e) { }
+    try { const raw = localStorage.getItem(LS); if (raw) { const s = JSON.parse(raw); if (s && s.v === 3 && Array.isArray(s.patients) && Array.isArray(s.appts) && Array.isArray(s.convs) && Array.isArray(s.prestaciones) && Array.isArray(s.debitos) && s.cfg && s.flags) return s; } } catch (e) { }
     return seed();
   }
 
@@ -213,7 +219,7 @@
       const wd = d.getDay(), blocks = D.clinic.bloques[wd]; if (!blocks) continue;
       for (const p of profs) {
         if (!prof(p).dias.includes(wd)) continue;
-        const busy = S.appts.filter(a => a.prof === p && a.date === k && live(a) && a.id !== q.exclude);
+        const busy = S.appts.filter(a => a.prof === p && a.date === k && live(a) && a.id !== (q.ignoreApptId || q.exclude));
         for (const [b0, b1] of blocks) for (let t = b0; t + dur <= b1; t += 30) {
           if (k === k0 && t < nm + 30) continue;
           if (busy.some(a => t < a.start + a.dur && a.start < t + dur)) continue;
@@ -303,25 +309,40 @@
     obras: ['Obras sociales', 'shield'], finanzas: ['Finanzas', 'wallet'], agentes: ['Agentes IA', 'bot'], config: ['Configuración', 'settings']
   };
   function go(p, push = true) {
+    if (UI.sheet?.dirty && UI.sheet.confirmClose) {
+      if (!push) history.replaceState(null, '', '#' + UI.page);
+      UI.sheet.confirmClose(() => go(p, push)); return;
+    }
+    setMenu(false, false);
     if (!PAGES[p]) p = 'hoy';
     UI.page = p;
-    if (push && location.hash !== '#' + p) history.pushState(null, '', '#' + p);
+    if (location.hash !== '#' + p) history[push ? 'pushState' : 'replaceState'](null, '', '#' + p);
     closeSheet(true);
     render(); window.scrollTo(0, 0);
+    focusViewHeading();
   }
   window.addEventListener('popstate', () => go((location.hash || '#hoy').slice(1), false));
 
   function needsHumanCount() { return S.convs.filter(c => c.needsHuman).length; }
+  function setNavMarkup(selector, markup) {
+    const node = $(selector), signature = UI.page + '|' + needsHumanCount();
+    if (node.dataset.navSignature === signature) return;
+    node.innerHTML = markup; node.dataset.navSignature = signature;
+  }
   function renderNav() {
     const n = needsHumanCount();
     const item = (p) => `<button class="${UI.page === p ? 'active' : ''}" data-act="go" data-page="${p}">${ic(PAGES[p][1])}<span class="navtxt">${PAGES[p][0]}</span>${p === 'whatsapp' && n ? `<span class="count">${n}</span>` : ''}</button>`;
-    $('#sidenav').innerHTML = `<div class="navlabel">DÍA A DÍA</div>${['hoy', 'agenda', 'whatsapp', 'pacientes'].map(item).join('')}<div class="navlabel">ADMINISTRACIÓN</div>${['obras', 'finanzas'].map(item).join('')}<div class="navlabel">INTELIGENCIA</div>${['agentes', 'config'].map(item).join('')}`;
+    setNavMarkup('#sidenav', `<div class="navlabel">DÍA A DÍA</div>${['hoy', 'agenda', 'whatsapp', 'pacientes'].map(item).join('')}<div class="navlabel">ADMINISTRACIÓN</div>${['obras', 'finanzas'].map(item).join('')}<div class="navlabel">INTELIGENCIA</div>${['agentes', 'config'].map(item).join('')}`);
     const b = (p, label, icon, dot) => `<button class="${UI.page === p || (p === 'mas' && ['obras', 'finanzas', 'agentes', 'config'].includes(UI.page)) ? 'active' : ''}" data-act="${p === 'mas' ? 'more' : 'go'}" data-page="${p}">${ic(icon)}<span>${label}</span>${dot ? `<span class="dot">${dot}</span>` : ''}</button>`;
-    $('#bottomnav').innerHTML = b('hoy', 'Hoy', 'home') + b('agenda', 'Agenda', 'calendar') + b('whatsapp', 'WhatsApp', 'chat', n) + b('pacientes', 'Pacientes', 'users') + b('mas', 'Más', 'more');
+    setNavMarkup('#bottomnav', b('hoy', 'Hoy', 'home') + b('agenda', 'Agenda', 'calendar') + b('whatsapp', 'WhatsApp', 'chat', n) + b('pacientes', 'Pacientes', 'users') + b('mas', 'Más', 'more'));
     const bc = $('#bellcount'); bc.textContent = n; bc.classList.toggle('hidden', !n);
     $('#crumb').textContent = PAGES[UI.page][0];
     document.title = `${PAGES[UI.page][0]} · Clara`;
-    $('.fab').classList.toggle('hidden', !['hoy', 'agenda', 'pacientes'].includes(UI.page));
+    // The same action is available in each page heading, without covering rows.
+    $('.fab').classList.add('hidden');
+    document.querySelectorAll('#sidenav button, #bottomnav button').forEach(button => {
+      if (button.classList.contains('active')) button.setAttribute('aria-current', 'page');
+    });
   }
 
   /* ---------- Piezas comunes ---------- */
@@ -380,9 +401,8 @@
     if (issues.length) attn.push(`<div class="attn"><div class="a-ico">${ic('receipt')}</div><div class="a-body"><div class="a-title">${issues.length} prestaciones con faltantes antes de presentar</div><div class="a-text">Si se presentan así, vuelven como débito: ${money(issuesAmt)}.</div><div class="a-actions"><button class="btn sm primary" data-act="go" data-page="obras">Revisar</button></div></div></div>`);
 
     return `
-      <div class="pagehead"><div><h1>${saludo}, Lucía</h1><p>${dayTitle(k)}</p></div><div class="actions"><button class="btn primary hide-m" data-act="new-appt">${ic('plus')}Nuevo turno</button></div></div>
-      ${S.flags.bannerOff ? '' : `<div class="banner"><div class="b-ico">${ic('phone', 'lg')}</div><div><b>Probá a Clara como si fueras un paciente</b><span>Escribí por WhatsApp y mirá cómo aparece el turno en la agenda.</span></div><button class="btn sm" data-act="phone-open">Probar</button></div>`}
-      <div class="kpis">
+      <div class="pagehead"><div><h1>${saludo}, Lucía</h1><p>${dayTitle(k)}</p></div><div class="actions"><button class="btn primary" data-act="new-appt">${ic('plus')}Nuevo turno</button></div></div>
+      <div class="kpis today-kpis">
         <button class="card kpi" data-act="go" data-page="agenda"><div class="k-top"><span class="k-ico">${ic('calendar')}</span>Turnos ${isToday ? 'hoy' : dayRel(dayK).toLowerCase()}</div><div class="k-num">${list.length}</div><div class="k-sub">${done} atendidos · ${list.length - done} por venir</div></button>
         <button class="card kpi warn" data-act="go" data-page="agenda"><div class="k-top"><span class="k-ico">${ic('clock')}</span>Por confirmar</div><div class="k-num">${porConf}</div><div class="k-sub">Hoy y mañana</div></button>
         <button class="card kpi ${nh ? 'red' : ''}" data-act="go" data-page="whatsapp"><div class="k-top"><span class="k-ico">${ic('hand')}</span>Necesitan una persona</div><div class="k-num">${nh}</div><div class="k-sub">El resto lo responde Clara</div></button>
@@ -393,7 +413,7 @@
           <div class="list">${list.length ? list.map(a => apptRow(a, true)).join('') : '<div class="empty">No hay turnos cargados.</div>'}</div></div>
         <div class="stack">
           <div class="card"><div class="cardhead"><div><h2>Requiere tu atención</h2><div class="sub">Lo que los agentes no resuelven solos</div></div></div><div class="list">${attn.join('') || '<div class="empty">Todo en orden. ✨</div>'}</div></div>
-          <div class="card"><div class="cardhead"><div><h2>Lo que hicieron los agentes</h2><div class="sub">En tiempo real</div></div><button class="linkbtn" data-act="go" data-page="agentes">Agentes ${ic('arrow', 'sm')}</button></div>${feedHTML(7)}</div>
+          <details class="card activity-summary" data-detail-key="activity"><summary>Actividad de los agentes</summary><div class="cardhead"><div><h2>Lo que hicieron los agentes</h2><div class="sub">En tiempo real</div></div><button class="linkbtn" data-act="go" data-page="agentes">Agentes ${ic('arrow', 'sm')}</button></div>${feedHTML(7)}</details>
         </div>
       </div>`;
   }
@@ -405,6 +425,7 @@
     const pf = UI.agendaProf;
     const profsShown = pf === 'all' ? D.profs : D.profs.filter(p => p.id === pf);
     const list = apptsOn(k, pf);
+    const cancelled = S.appts.filter(a => a.date === k && a.status === 'cancelado' && (pf === 'all' || a.prof === pf)).sort((a, b) => a.start - b.start);
     const wd = fromKey(k).getDay();
     const strip = Array.from({ length: 15 }, (_, i) => addDays(today(), i - 1)).map(d => { const kk = key(d); const n = apptsOn(kk, pf).length; const closed = !D.clinic.bloques[d.getDay()]; return `<button class="daychip ${kk === k ? 'on' : ''} ${kk === tk() ? 'today' : ''} ${closed ? 'closed' : ''}" data-act="agenda-day" data-k="${kk}"><span class="dn">${kk === tk() ? 'hoy' : WD[d.getDay()]}</span><span class="dd">${d.getDate()}</span><span class="dc">${closed ? '' : n ? n + ' t.' : 'libre'}</span></button>`; }).join('');
     const chips = `<button class="fchip ${pf === 'all' ? 'on' : ''}" data-act="agenda-prof" data-p="all">Todos</button>` + D.profs.map(p => `<button class="fchip ${pf === p.id ? 'on' : ''}" data-act="agenda-prof" data-p="${p.id}"><i style="background:var(--${p.color === 'teal' ? 'teal' : p.color})"></i>${p.corto}</button>`).join('');
@@ -438,13 +459,14 @@
 
     return `
       <div class="pagehead"><div><h1>Agenda</h1><p>Turnos de recepción y los que agenda Clara por WhatsApp, todo junto.</p></div>
-        <div class="actions"><div class="seg hide-m"><button class="${UI.agendaView === 'dia' ? 'on' : ''}" data-act="agenda-view" data-v="dia">Día</button><button class="${UI.agendaView === 'semana' ? 'on' : ''}" data-act="agenda-view" data-v="semana">Semana</button></div><button class="btn primary hide-m" data-act="new-appt" data-k="${k}">${ic('plus')}Nuevo turno</button></div></div>
+        <div class="actions"><div class="seg hide-m"><button class="${UI.agendaView === 'dia' ? 'on' : ''}" data-act="agenda-view" data-v="dia">Día</button><button class="${UI.agendaView === 'semana' ? 'on' : ''}" data-act="agenda-view" data-v="semana">Semana</button></div><button class="btn primary" data-act="new-appt" data-k="${k}">${ic('plus')}Nuevo turno</button></div></div>
       <div class="agenda-bar">
         <div class="datenav"><button class="iconbtn" data-act="agenda-shift" data-n="${UI.agendaView === 'semana' ? -7 : -1}" aria-label="Anterior">${ic('chevL')}</button><h2>${UI.agendaView === 'semana' ? 'Semana del ' + dm(key(monday)) : dayTitle(k)}</h2><button class="iconbtn" data-act="agenda-shift" data-n="${UI.agendaView === 'semana' ? 7 : 1}" aria-label="Siguiente">${ic('chevR')}</button>${k !== tk() ? '<button class="btn sm ghost" data-act="agenda-day" data-k="' + tk() + '">Hoy</button>' : ''}</div>
         <div class="chips">${chips}</div>
       </div>
       <div class="daystrip">${strip}</div>
       <div class="${UI.agendaView === 'semana' ? 'week-mode' : ''}">${mobile}${grid}${week}</div>
+      ${cancelled.length ? `<details class="card agenda-cancelled" data-detail-key="cancelled-${k}"><summary>Turnos cancelados (${cancelled.length})</summary><div class="list">${cancelled.map(a => apptRow(a, true)).join('')}</div></details>` : ''}
       <p class="tiny muted" style="margin-top:10px">Punto verde: lo agendó Clara · amarillo: falta que el paciente confirme · azul: espera aprobación de recepción.</p>`;
   }
 
@@ -475,6 +497,60 @@
       return `<div class="msg ${mine ? 'out' : 'in'}">${tag}${esc(m.text)}<span class="m-time">${clock(m.t)}</span></div>`;
     }).join('');
   }
+  function syncMessages(box, c, side, { intro = '', typing = false } = {}) {
+    const messages = c ? c.msgs : [];
+    const convId = c ? c.id : '';
+    const count = Number(box.dataset.syncCount || 0);
+    const oldSig = box.dataset.syncSig || '';
+    const signature = (list, length = list.length) => {
+      let hash = 2166136261;
+      for (let i = 0; i < length; i++) {
+        const m = list[i];
+        const part = JSON.stringify([m.from, m.agent || '', m.text || '', m.t || 0]);
+        for (let j = 0; j < part.length; j++) hash = Math.imul(hash ^ part.charCodeAt(j), 16777619);
+        hash = Math.imul(hash ^ 0xff, 16777619);
+      }
+      return `${length}:${hash >>> 0}`;
+    };
+    const prefixMatches = count <= messages.length && signature(messages, count) === oldSig;
+    const canAppend = box.dataset.syncConv === convId && box.dataset.syncSide === side &&
+      count <= messages.length && prefixMatches && (!intro || box.querySelector(':scope > .sync-intro'));
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+    let appendedOwnMessage = false;
+
+    if (!canAppend) {
+      box.innerHTML = `${intro ? `<div class="ph-intro sync-intro">${intro}</div>` : ''}${c ? msgsHTML(c, side) : ''}`;
+      box.dataset.syncConv = convId;
+      box.dataset.syncSide = side;
+      box.dataset.syncIntro = intro;
+      box.dataset.syncCount = String(messages.length);
+      box.dataset.syncSig = signature(messages);
+    } else {
+      if (box.dataset.syncIntro !== intro) {
+        const introNode = box.querySelector(':scope > .sync-intro');
+        if (intro) {
+          if (introNode) introNode.innerHTML = intro;
+          else box.insertAdjacentHTML('afterbegin', `<div class="ph-intro sync-intro">${intro}</div>`);
+        } else introNode?.remove();
+        box.dataset.syncIntro = intro;
+      }
+      if (messages.length > count) {
+        const newMessages = messages.slice(count);
+        appendedOwnMessage = newMessages.some(m => side === 'patient' ? m.from === 'patient' : m.from !== 'patient' && m.from !== 'sys');
+        const typingNode = box.querySelector(':scope > .typing');
+        if (typingNode) typingNode.remove();
+        box.insertAdjacentHTML('beforeend', msgsHTML({ msgs: newMessages }, side));
+        box.dataset.syncCount = String(messages.length);
+        box.dataset.syncSig = signature(messages);
+      }
+    }
+
+    const typingNode = box.querySelector(':scope > .typing');
+    if (typing && !typingNode) box.insertAdjacentHTML('beforeend', '<div class="typing"><i></i><i></i><i></i></div>');
+    else if (!typing && typingNode) typingNode.remove();
+
+    if (!canAppend || nearBottom || appendedOwnMessage) box.scrollTop = box.scrollHeight;
+  }
   function convHTML(c) {
     const p = c.patientId ? patient(c.patientId) : null;
     const foot = c.mode === 'human'
@@ -488,9 +564,9 @@
   /* ---------- Página: Pacientes ---------- */
   function pagePacientes() {
     const rows = S.patients.map(p => { const nx = upcoming(p.id)[0]; return `<button class="row tap" data-act="patient" data-id="${p.id}" data-name="${esc((p.nombre + ' ' + p.cob + ' ' + p.tel).toLowerCase())}"><div class="avatar gray">${initials(p.nombre)}</div><div class="grow"><div class="title">${esc(p.nombre)} ${p.nuevo ? '<span class="chip wa" style="margin-left:4px">Nuevo por WhatsApp</span>' : ''}</div><div class="meta">${esc(cobLabel(p))} · ${nx ? 'Próximo: ' + dayRel(nx.date) + ' ' + hhmm(nx.start) : 'Sin turnos próximos'}</div></div>${p.alergias ? `<span class="chip warn">${ic('alert')}${esc(p.alergias)}</span>` : ''}</button>`; }).join('');
-    return `<div class="pagehead"><div><h1>Pacientes</h1><p>${S.patients.length} pacientes · datos ficticios</p></div><div class="actions"><button class="btn primary hide-m" data-act="new-appt">${ic('plus')}Nuevo turno</button></div></div>
-      <div class="field" style="position:relative"><input id="psearch" placeholder="Buscar por nombre, obra social o teléfono" style="padding-left:40px" aria-label="Buscar paciente"><span style="position:absolute;left:12px;top:12px;color:var(--muted)">${ic('search')}</span></div>
-      <div class="card list" id="plist">${rows}</div>`;
+    return `<div class="pagehead"><div><h1>Pacientes</h1><p>${S.patients.length} pacientes · datos ficticios</p></div><div class="actions"><button class="btn primary" data-act="new-appt">${ic('plus')}Nuevo turno</button></div></div>
+      <div class="field" style="position:relative"><input id="psearch" type="search" value="${esc(UI.patientQuery)}" placeholder="Nombre, cobertura o teléfono" style="padding-left:40px" aria-label="Buscar paciente"><span style="position:absolute;left:12px;top:12px;color:var(--muted)">${ic('search')}</span></div>
+      <p id="patient-results" class="small muted" role="status"></p><div class="card list" id="plist">${rows}</div><div class="card empty hidden" id="patient-empty">No encontramos pacientes con esa búsqueda.</div>`;
   }
 
   /* ---------- Página: Obras sociales ---------- */
@@ -517,42 +593,57 @@
   };
   function pageObras() {
     const pres = S.prestaciones.filter(x => !x.excluded);
-    const total = pres.reduce((s, x) => s + x.monto, 0);
-    const checked = pres.some(x => x.checked);
-    const withIss = pres.filter(x => issuesOf(x).length);
-    const debTot = S.debitos.reduce((s, x) => s + x.monto, 0);
-    const recTot = S.debitos.filter(x => DEB[x.cat].rec).reduce((s, x) => s + x.monto, 0);
+    const checked = pres.filter(x => x.checked);
+    const withIssues = checked.filter(x => issuesOf(x).length);
+    const ready = checked.filter(x => !issuesOf(x).length);
+    const sum = list => money(list.reduce((total, x) => total + x.monto, 0));
+    const query = A.norm(UI.osQuery || '');
+    const match = (item, extra = '') => A.norm(`${patient(item.patientId).nombre} ${item.cob} ${servicio(item.servicio).nombre} ${extra}`).includes(query);
+    const filter = UI.osFilter || 'all';
     const prevMes = MES[new Date(today().getFullYear(), today().getMonth() - 1, 1).getMonth()];
-    let body = '';
+    let body = '', options = [], rows = [], summary = '';
     if (UI.osTab === 'pre') {
-      body = `<div class="card"><div class="cardhead"><div><h2>Prestaciones de ${prevMes}</h2><div class="sub">${pres.length} prestaciones · ${money(total)} para presentar</div></div><button class="btn primary sm" data-act="run-precheck" ${UI.checking ? 'disabled' : ''}>${ic('sparkle', 'sm')}${UI.checking ? 'Revisando…' : checked ? 'Revisar de nuevo' : 'Revisar con IA'}</button></div>
-        ${!checked ? `<div style="padding:0 16px 12px"><div class="note">El agente de facturación compara cada prestación con las normas de la obra social (papeles, firmas, radiografías, topes y autorizaciones) <b>antes</b> de presentar, para que no vuelva como débito. Tocá <b>Revisar con IA</b>.</div></div>` : ''}
-        <div class="list">${pres.map(x => { const p = patient(x.patientId), sv = servicio(x.servicio), iss = issuesOf(x); const st = !x.checked ? '<span class="chip">Sin revisar</span>' : iss.length ? `<span class="chip warn">${iss.length} faltante${iss.length > 1 ? 's' : ''}</span>` : `<span class="chip ok">${ic('check')}Lista</span>`;
-          return `<div class="attn"><div class="a-ico ${!x.checked ? 'teal' : iss.length ? '' : 'teal'}">${!x.checked ? ic('file') : iss.length ? ic('alert') : ic('check')}</div><div class="a-body"><div style="display:flex;justify-content:space-between;gap:8px"><div class="a-title">${esc(p.nombre)}</div><span class="money small">${money(x.monto)}</span></div><div class="a-text">${esc(sv.nombre)}${x.pieza ? ' · pieza ' + x.pieza : ''} · ${esc(x.cob)} · ${dm(x.fecha)} · ${esc(prof(x.prof).corto)}</div><div style="margin-top:6px">${st}</div>
-          ${x.checked && iss.length ? `<div class="a-actions">${iss.map(i => { const pend = x[i.code] === 'pedido'; return `<div style="display:flex;align-items:center;gap:8px;width:100%;flex-wrap:wrap"><span class="small" style="flex:1;min-width:150px">• ${esc(i.text)}${pend ? ' <span class="chip blue">Pedido al paciente</span>' : ''}</span>${pend ? `<button class="btn sm ghost" data-act="fix" data-id="${x.id}" data-code="${i.code}" data-done="1">Marcar recibido</button>` : `<button class="btn sm soft" data-act="fix" data-id="${x.id}" data-code="${i.code}">${esc(i.fix)}</button>`}</div>`; }).join('')}</div>` : ''}</div></div>`; }).join('')}</div>
-        ${checked ? `<div style="padding:12px 16px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn primary" data-act="build-batch" ${withIss.length ? 'disabled' : ''}>${ic('file')}Armar lote para presentar</button><span class="small muted">${withIss.length ? `Faltan resolver ${withIss.length}. Las listas ya se pueden presentar.` : 'Todo listo para presentar.'}</span></div>` : ''}
-      </div>`;
+      options = [['all', 'Todas las prestaciones'], ['issues', 'Con faltantes'], ['ready', 'Listas para presentar'], ['pending', 'Sin revisar'], ['excluded', 'Pasadas a particular']];
+      rows = S.prestaciones.filter(x => match(x) && (filter === 'all' ||
+        filter === 'excluded' && x.excluded || !x.excluded && (filter === 'issues' && x.checked && issuesOf(x).length ||
+        filter === 'ready' && x.checked && !issuesOf(x).length || filter === 'pending' && !x.checked)));
+      summary = `${ready.length} listas · ${withIssues.length} con faltantes · ${pres.length - checked.length} sin revisar`;
+      body = `<div class="card os-summary"><div><h2>Prestaciones de ${prevMes}</h2><p class="small muted">${summary}</p></div><button class="btn primary" data-act="run-precheck" ${UI.checking ? 'disabled' : ''}>${ic('sparkle', 'sm')}${UI.checking ? 'Revisando…' : 'Revisar prestaciones'}</button></div>`;
+      body += `<div class="os-list">${rows.map(x => {
+        const p = patient(x.patientId), sv = servicio(x.servicio), issues = x.excluded ? [] : issuesOf(x);
+        const status = x.excluded ? 'Particular' : !x.checked ? 'Sin revisar' : issues.length ? `${issues.length} faltante${issues.length > 1 ? 's' : ''}` : 'Lista';
+        return `<article class="card os-item" data-os-id="${x.id}"><div class="os-item-head"><h3>${esc(p.nombre)}</h3><span class="money">${money(x.monto)}</span></div><p class="os-item-meta">${esc(sv.nombre)} · ${esc(x.cob)}</p><div class="os-item-status"><span class="chip ${x.excluded ? '' : !x.checked ? '' : issues.length ? 'warn' : 'ok'}">${status}</span></div>
+          <details class="os-details" data-detail-key="pre-${x.id}"><summary>${x.checked && issues.length ? 'Resolver faltantes' : 'Ver detalle'}</summary><p class="small muted">${dm(x.fecha)} · ${esc(prof(x.prof).corto)}${x.pieza ? ' · Pieza ' + esc(String(x.pieza)) : ''}</p>
+          ${x.excluded ? '<p class="small">Esta prestación quedó fuera del lote de obra social.</p>' : !x.checked ? '<p class="small">Usá «Revisar prestaciones» para identificar los documentos pendientes.</p>' : issues.length ? `<div class="os-issues">${issues.map(issue => {
+            const pending = x[issue.code] === 'pedido';
+            return `<div><span>${esc(issue.text)}${pending ? ' <span class="chip blue">Solicitado</span>' : ''}</span><button class="btn ${pending ? 'ghost' : 'soft'}" data-act="fix" data-id="${x.id}" data-code="${issue.code}" ${pending ? 'data-done="1"' : ''}>${pending ? 'Marcar recibido' : esc(issue.fix)}</button></div>`;
+          }).join('')}</div>` : '<p class="small">Sin faltantes según las reglas de ejemplo. Lista para el lote de demostración.</p>'}</details></article>`;
+      }).join('') || '<div class="card empty">No hay prestaciones que coincidan con la búsqueda y el filtro.</div>'}</div>`;
+      body += `<div class="card os-summary"><div><h2>Preparar presentación</h2><p class="small muted">${ready.length ? `${ready.length} listas por ${sum(ready)}. Las demás quedan fuera del lote.` : 'Revisá las prestaciones y resolvé los faltantes para continuar.'}</p></div><button class="btn ${ready.length ? 'primary' : 'ghost'}" data-act="build-batch" ${!ready.length || UI.checking ? 'disabled' : ''}>Preparar lote de demo</button></div>`;
     } else if (UI.osTab === 'deb') {
-      const classified = S.debitos.some(d => d.classified);
-      body = `<div class="card"><div class="cardhead"><div><h2>Débitos de la liquidación de ${S.debitosMes}</h2><div class="sub">${S.debitos.length} débitos · ${money(debTot)}</div></div><button class="btn primary sm" data-act="run-debitos">${ic('sparkle', 'sm')}${classified ? 'Ordenar de nuevo' : 'Ordenar con IA'}</button></div>
-        ${!classified ? `<div style="padding:0 16px 12px"><div class="note">Así llegan los débitos: un código y un texto corto. El agente los ordena por motivo, separa los que se pueden reclamar y te arma el borrador del reclamo. Siempre lo revisa y lo manda una persona.</div></div>` : ''}
-        <div class="list">${S.debitos.map(d => { const p = patient(d.patientId), cat = DEB[d.cat]; return `<div class="attn"><div class="a-ico ${!d.classified ? 'teal' : cat.rec ? 'teal' : 'red'}">${ic(d.classified ? (cat.rec ? 'refresh' : 'x') : 'receipt')}</div><div class="a-body"><div style="display:flex;justify-content:space-between;gap:8px"><div class="a-title">${esc(p.nombre)} · ${esc(servicio(d.servicio).nombre)}</div><span class="money small">${money(d.monto)}</span></div><div class="a-text">${esc(d.cob)} · <span style="font-family:ui-monospace,monospace;font-size:11.5px">${esc(d.raw)}</span></div>
-          ${d.classified ? `<div class="a-actions"><span class="chip ${cat.rec ? 'ok' : 'red'}">${cat.rec ? 'Se puede reclamar' : 'No se recupera'}</span><span class="chip">${esc(cat.label)}</span></div><div class="small" style="margin-top:6px">→ ${esc(cat.accion)}</div>${cat.rec ? `<div class="a-actions">${d.estado === 'enviado' ? `<span class="chip blue">${ic('check')}Reclamo listo para enviar</span>` : `<button class="btn sm soft" data-act="claim" data-id="${d.id}">Ver borrador del reclamo</button>`}</div>` : `<div class="a-actions"><button class="btn sm ghost" data-act="charge" data-id="${d.id}">${d.estado === 'cobrar' ? 'Avisado al paciente ✓' : 'Avisar al paciente'}</button></div>`}` : ''}
-          </div></div>`; }).join('')}</div></div>`;
+      options = [['all', 'Todos los débitos'], ['pending', 'Sin ordenar'], ['claimable', 'Se pueden reclamar'], ['nonclaimable', 'No reclamables'], ['done', 'Gestionados']];
+      rows = S.debitos.filter(x => match(x, `${x.raw} ${DEB[x.cat].label}`) && (filter === 'all' || filter === 'pending' && !x.classified ||
+        filter === 'claimable' && x.classified && DEB[x.cat].rec && x.estado !== 'enviado' ||
+        filter === 'nonclaimable' && x.classified && !DEB[x.cat].rec && x.estado !== 'cobrar' ||
+        filter === 'done' && ['enviado', 'cobrar'].includes(x.estado)));
+      summary = `${S.debitos.length} débitos · ${sum(S.debitos)} en ${S.debitosMes}`;
+      body = `<div class="card os-summary"><div><h2>Débitos de ${S.debitosMes}</h2><p class="small muted">${summary}</p></div><button class="btn primary" data-act="run-debitos" ${UI.checkingDebitos ? 'disabled' : ''}>${ic('sparkle', 'sm')}${UI.checkingDebitos ? 'Ordenando…' : 'Ordenar débitos'}</button></div>
+        <div class="os-list">${rows.map(d => {
+          const p = patient(d.patientId), cat = DEB[d.cat], managed = ['enviado', 'cobrar'].includes(d.estado);
+          return `<article class="card os-item" data-os-id="${d.id}"><div class="os-item-head"><h3>${esc(p.nombre)}</h3><span class="money">${money(d.monto)}</span></div><p class="os-item-meta">${esc(servicio(d.servicio).nombre)} · ${esc(d.cob)}</p>
+          <span class="chip ${managed ? 'blue' : !d.classified ? '' : cat.rec ? 'ok' : 'warn'}">${managed ? 'Gestionado en demo' : !d.classified ? 'Sin ordenar' : cat.rec ? 'Se puede reclamar' : 'Revisar con el paciente'}</span>
+          <details class="os-details" data-detail-key="deb-${d.id}"><summary>${d.classified && !managed ? 'Ver motivo y siguiente paso' : 'Ver detalle'}</summary><p class="small">Motivo informado: ${esc(d.raw)}</p>${d.classified ? `<p class="small"><b>${esc(cat.label)}</b><br>${esc(cat.accion)}</p>${cat.rec ? d.estado === 'enviado' ? `<p class="small">Borrador aprobado en esta demo. No fue enviado a ningún servicio.</p><button class="btn ghost" data-act="claim" data-id="${d.id}">Ver borrador aprobado</button>` : `<button class="btn soft" data-act="claim" data-id="${d.id}">Revisar borrador</button>` : `<button class="btn ghost" data-act="charge" data-id="${d.id}" ${d.estado === 'cobrar' ? 'disabled' : ''}>${d.estado === 'cobrar' ? 'Aviso simulado registrado' : 'Simular aviso al paciente'}</button>`}` : '<p class="small muted">Usá «Ordenar débitos» para ver el motivo y las acciones disponibles.</p>'}</details></article>`;
+        }).join('') || '<div class="card empty">No hay débitos que coincidan con la búsqueda y el filtro.</div>'}</div>`;
     } else {
-      body = `<div class="stack">${Object.values(D.coberturas).filter(c => c.nombre !== 'Particular').map(c => `<div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="font-size:16px">${esc(c.nombre)}</h2><span class="chip teal">${esc(c.via)}</span></div><p class="small" style="margin:8px 0">${esc(c.general)}</p><div class="small"><b>Qué trae el paciente (consulta):</b> ${esc((c.traer.consulta || c.traer._default).join(' · '))}</div>${c.tip ? `<div class="small muted" style="margin-top:6px">💡 ${esc(c.tip)}</div>` : ''}<div class="small muted" style="margin-top:6px">No cubre: ${esc(c.noCubre.map(id => servicio(id).nombre).join(', ') || '—')}</div></div>`).join('')}
-        <div class="note warn">Estas fichas son <b>ejemplos</b>. En el producto real, cada clínica carga las normas vigentes de su círculo o colegio y de cada obra social (topes, papeles, radiografías), y la secretaria las corrige cuando cambian. De ahí sale lo que dice el agente.</div></div>`;
+      body = `<div class="stack">${Object.values(D.coberturas).filter(c => c.nombre !== 'Particular').map(c => `<details class="card pad os-rules" data-detail-key="regla-${esc(c.nombre)}"><summary><span>${esc(c.nombre)}</span><span class="chip teal">${esc(c.via)}</span></summary><div><p class="small">${esc(c.general)}</p><p class="small"><b>Para una consulta:</b> ${esc((c.traer.consulta || c.traer._default).join(' · '))}</p>${c.tip ? `<p class="small muted">${esc(c.tip)}</p>` : ''}<p class="small muted">No cubre: ${esc(c.noCubre.map(id => servicio(id).nombre).join(', ') || '—')}</p></div></details>`).join('')}</div>`;
     }
-    return `<div class="pagehead"><div><h1>Obras sociales</h1><p>Revisar antes de presentar y recuperar los débitos.</p></div></div>
-      <div class="kpis">
-        <div class="card kpi"><div class="k-top"><span class="k-ico">${ic('file')}</span>Para presentar</div><div class="k-num">${money(total)}</div><div class="k-sub">${pres.length} prestaciones de ${prevMes}</div></div>
-        <div class="card kpi warn"><div class="k-top"><span class="k-ico">${ic('alert')}</span>Con faltantes</div><div class="k-num">${checked ? withIss.length : '—'}</div><div class="k-sub">${checked ? money(withIss.reduce((s, x) => s + x.monto, 0)) + ' en riesgo' : 'Falta revisar'}</div></div>
-        <div class="card kpi red"><div class="k-top"><span class="k-ico">${ic('receipt')}</span>Débitos último mes</div><div class="k-num">${money(debTot)}</div><div class="k-sub">${S.debitos.length} prestaciones</div></div>
-        <div class="card kpi blue"><div class="k-top"><span class="k-ico">${ic('refresh')}</span>Se pueden reclamar</div><div class="k-num">${money(recTot)}</div><div class="k-sub">${S.debitos.filter(x => DEB[x.cat].rec).length} débitos</div></div>
-      </div>
-      <div class="seg" style="margin-bottom:12px;display:flex;width:fit-content;max-width:100%;overflow-x:auto"><button class="${UI.osTab === 'pre' ? 'on' : ''}" data-act="os-tab" data-t="pre">Antes de presentar</button><button class="${UI.osTab === 'deb' ? 'on' : ''}" data-act="os-tab" data-t="deb">Débitos</button><button class="${UI.osTab === 'reglas' ? 'on' : ''}" data-act="os-tab" data-t="reglas">Reglas</button></div>
-      ${body}`;
+    return `<div class="pagehead"><div><h1>Obras sociales</h1><p>Resolvé pendientes y prepará la presentación.</p></div></div>
+      <p class="note os-demo">Demostración con reglas de ejemplo. No se consulta ni se envía información a obras sociales.</p>
+      <div class="os-overview"><div><span class="small muted">Para presentar</span><strong>${sum(pres)}</strong></div><div><span class="small muted">Débitos reclamables</span><strong>${sum(S.debitos.filter(x => DEB[x.cat].rec))}</strong></div></div>
+      <div class="seg os-tabs" role="group" aria-label="Sección de obras sociales">${[['pre', 'Prestaciones'], ['deb', 'Débitos'], ['reglas', 'Coberturas']].map(([tab, name]) => `<button class="${UI.osTab === tab ? 'on' : ''}" data-act="os-tab" data-t="${tab}">${name}</button>`).join('')}</div>
+      ${UI.osTab !== 'reglas' ? `<div class="os-toolbar"><div class="field"><label for="os-search">Buscar paciente, cobertura o prestación</label><input id="os-search" type="search" value="${esc(UI.osQuery || '')}" placeholder="Ej.: Camila u OSDE" autocomplete="off"></div><div class="field"><label for="os-filter">Estado</label><select id="os-filter">${options.map(([value, label]) => `<option value="${value}" ${filter === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><p class="small muted" id="os-result-count" role="status">${rows.length} resultado${rows.length === 1 ? '' : 's'}</p>` : ''}${body}`;
   }
+
 
   /* ---------- Página: Agentes ---------- */
   function pageAgentes() {
@@ -606,19 +697,31 @@
   /* ---------- Render principal ---------- */
   const RENDER = { hoy: pageHoy, agenda: pageAgenda, whatsapp: pageWhatsapp, pacientes: pagePacientes, obras: pageObras, agentes: pageAgentes, finanzas: pageFinanzas, config: pageConfig };
   function render() {
+    const previous = document.activeElement;
+    const focusedId = previous?.id;
+    const caret = previous && /INPUT|TEXTAREA/.test(previous.tagName) ? previous.selectionStart : null;
+    const opened = new Set([...document.querySelectorAll('#view details[open][data-detail-key]')].map(x => x.dataset.detailKey));
     renderNav();
     const v = $('#view');
     v.innerHTML = RENDER[UI.page]();
     hydrate(v);
+    enhanceContent(v);
+    v.querySelectorAll('details[data-detail-key]').forEach(detail => { if (opened.has(detail.dataset.detailKey)) detail.open = true; });
+    filterPatients();
+    const replacement = focusedId && document.getElementById(focusedId);
+    if (replacement && v.contains(replacement)) {
+      replacement.focus({ preventScroll: true });
+      if (caret != null && /^(text|search|tel|email|url|password)$/.test(replacement.type)) replacement.setSelectionRange(caret, caret);
+    }
+    syncOverlays();
     if (UI.page === 'whatsapp') { const m = $('#conv-msgs'); if (m) m.scrollTop = m.scrollHeight; }
     S.activity.forEach(x => { x.fresh = false; });
   }
-  function refresh() {
-    renderNav();
+  function refresh(force = false) {
     const ae = document.activeElement;
     const typingInView = ae && $('#view').contains(ae) && /INPUT|TEXTAREA|SELECT/.test(ae.tagName);
-    if (typingInView) {
-      if (UI.page === 'whatsapp') { const c = S.convs.find(x => x.id === UI.inboxConv); const m = $('#conv-msgs'); if (c && m) { m.innerHTML = msgsHTML(c, 'clinic'); m.scrollTop = m.scrollHeight; } }
+    if (typingInView && !force) {
+      if (UI.page === 'whatsapp') { const c = S.convs.find(x => x.id === UI.inboxConv); const m = $('#conv-msgs'); if (c && m) syncMessages(m, c, 'clinic', { typing: !!UI.typing[c.id] }); }
     } else {
       const y = window.scrollY; render(); window.scrollTo(0, y);
     }
@@ -633,13 +736,13 @@
   function renderPhone() {
     if (!$('#phonedock').classList.contains('open')) return;
     const c = convByTel(persona().tel);
-    const msgs = c ? c.msgs : [];
     const box = $('#ph-msgs');
-    box.innerHTML = `<div class="ph-intro">Estás del lado del <b>paciente</b>. Lo que escribas acá lo responde Clara y se refleja en el panel de la clínica.${matchMedia('(min-width: 900px)').matches ? ' Mirá la agenda a la izquierda.' : ''}</div>` + (c ? msgsHTML(c, 'patient') : '') + (c && UI.typing[c.id] ? '<div class="typing"><i></i><i></i><i></i></div>' : '');
-    box.scrollTop = box.scrollHeight;
+    const intro = `Estás del lado del <b>paciente</b>. Lo que escribas acá lo responde Clara y se refleja en el panel de la clínica.${matchMedia('(min-width: 900px)').matches ? ' Mirá la agenda a la izquierda.' : ''}`;
+    syncMessages(box, c, 'patient', { intro, typing: !!(c && UI.typing[c.id]) });
     $('#ph-status').textContent = c && c.mode === 'human' ? 'en línea · te atiende recepción' : (c && UI.typing[c.id] ? 'escribiendo…' : 'en línea · responde Clara (IA)');
   }
   function openPhone(say) {
+    if (!$('#phonedock').classList.contains('open')) returnFocus.phone = document.activeElement;
     $('#phonedock').classList.add('open'); $('#phonedock').setAttribute('aria-hidden', 'false');
     document.body.classList.add('dock-open');
     $('#ph-persona').innerHTML = D.personas.map(p => `<option value="${p.id}" ${p.id === S.persona ? 'selected' : ''}>${p.label}${p.patientId ? ' (' + patient(p.patientId).cob + ')' : ''}</option>`).join('');
@@ -649,9 +752,15 @@
     if (UI.page === 'hoy') { const y = window.scrollY; render(); window.scrollTo(0, y); }
     if (matchMedia('(min-width: 900px)').matches && UI.page !== 'agenda' && UI.page !== 'whatsapp' && !say) go('agenda');
     if (say) setTimeout(() => sendFromPhone(say), 250);
-    else if (matchMedia('(min-width: 900px)').matches) setTimeout(() => $('#ph-input').focus(), 60);
+    syncOverlays();
+    if (!say) $('#ph-input').focus({ preventScroll: true });
   }
-  function closePhone() { $('#phonedock').classList.remove('open'); $('#phonedock').setAttribute('aria-hidden', 'true'); document.body.classList.remove('dock-open'); }
+  function closePhone() {
+    const wasOpen = $('#phonedock').classList.contains('open');
+    $('#phonedock').classList.remove('open'); $('#phonedock').setAttribute('aria-hidden', 'true'); document.body.classList.remove('dock-open');
+    syncOverlays();
+    if (wasOpen) restoreFocus('phone');
+  }
   function sendFromPhone(text) {
     text = (text || '').trim(); if (!text) return;
     const c = simConv();
@@ -661,9 +770,12 @@
 
   /* ---------- Hojas (detalle y formularios) ---------- */
   function openSheet(title, bodyFn, footFn, opts = {}) {
+    if (!UI.sheet) returnFocus.sheet = document.activeElement;
     UI.sheet = { title, bodyFn, footFn, refresh: () => paintSheet() };
     paintSheet();
     $('#sheet').classList.add('open'); $('#sheetbg').classList.add('open');
+    syncOverlays();
+    ($('#sheet .sheet-body').querySelector('input,select,textarea') || $('#sheet [data-act="sheet-close"]'))?.focus({ preventScroll: true });
     if (!opts.keepScroll) $('#sheet .sheet-body').scrollTop = 0;
   }
   function paintSheet() {
@@ -672,10 +784,45 @@
     const ae = document.activeElement; if (ae && body.contains(ae) && /INPUT|TEXTAREA/.test(ae.tagName) && !UI.sheet.force) return;
     UI.sheet.force = false;
     const foot = UI.sheet.footFn ? UI.sheet.footFn() : '';
-    body.innerHTML = `<div class="sheet-head"><h2>${UI.sheet.title}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Cerrar">${ic('x')}</button></div><div class="sheet-body">${UI.sheet.bodyFn()}</div>${foot ? `<div class="sheet-foot">${foot}</div>` : ''}`;
+    const focusedId = ae && body.contains(ae) ? ae.id : null;
+    const focusedAction = ae && body.contains(ae) ? ae.dataset.act : null;
+    body.innerHTML = `<div class="sheet-head"><h2 id="sheet-title">${UI.sheet.title}</h2><button class="iconbtn" data-act="sheet-close" aria-label="Cerrar">${ic('x')}</button></div><div class="sheet-body">${UI.sheet.bodyFn()}</div>${foot ? `<div class="sheet-foot">${foot}</div>` : ''}`;
+    enhanceContent(body);
+    if (focusedId) document.getElementById(focusedId)?.focus({ preventScroll: true });
+    else if (focusedAction) [...body.querySelectorAll('[data-act]')].find(x => x.dataset.act === focusedAction)?.focus({ preventScroll: true });
     $('#sheet-inner .sheet-body').scrollTop = top;
   }
-  function closeSheet(silent) { UI.sheet = null; $('#sheet').classList.remove('open'); $('#sheetbg').classList.remove('open'); }
+  function closeSheet(silent) {
+    if (!silent && UI.sheet?.dirty && UI.sheet.confirmClose) { UI.sheet.confirmClose(() => closeSheet(true)); return; }
+    const wasOpen = !!UI.sheet;
+    UI.sheet = null; $('#sheet').classList.remove('open'); $('#sheetbg').classList.remove('open');
+    syncOverlays();
+    if (wasOpen && !silent) restoreFocus('sheet');
+  }
+
+  function confirmDiscard(after) {
+    if (UI.discard) return;
+    UI.discard = { sheet: UI.sheet, form: UI.form, after };
+    openSheet('¿Descartar los cambios?', () => '<p>Tenés cambios sin guardar. Podés seguir editando o descartarlos.</p>',
+      () => '<button class="btn primary" data-act="draft-keep">Seguir editando</button><button class="btn danger" data-act="draft-discard">Descartar cambios</button>');
+    UI.sheet.confirmClose = () => keepDraft();
+    UI.sheet.dirty = true;
+  }
+  function keepDraft() {
+    if (!UI.discard) return;
+    const saved = UI.discard; UI.discard = null;
+    UI.sheet = saved.sheet; UI.form = saved.form;
+    paintSheetForce(); syncOverlays();
+    ($('#sheet .sheet-body input, #sheet .sheet-body select, #sheet textarea') || $('#sheet [data-act="sheet-close"]'))?.focus({ preventScroll: true });
+  }
+  function filterPatients() {
+    const list = $('#plist'); if (!list) return;
+    const query = A.norm(UI.patientQuery); let visible = 0;
+    list.querySelectorAll('[data-name]').forEach(row => { row.hidden = !A.norm(row.dataset.name).includes(query); if (!row.hidden) visible++; });
+    $('#patient-results').textContent = `${visible} paciente${visible === 1 ? '' : 's'}`;
+    $('#patient-empty').classList.toggle('hidden', visible > 0);
+    list.classList.toggle('hidden', visible === 0);
+  }
 
   function showAppt(id) {
     const a = appt(id); if (!a) return;
@@ -701,6 +848,7 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${conv ? `<button class="btn sm ghost" data-act="open-conv" data-id="${conv.id}">${ic('chat', 'sm')}Ver chat</button>` : ''}
           <button class="btn sm ghost" data-act="patient" data-id="${p.id}">${ic('user', 'sm')}Ficha</button>
+          ${['confirmado', 'por_confirmar', 'pendiente'].includes(a.status) ? `<button class="btn sm primary" data-act="reprogram-appt" data-id="${a.id}">${ic('calendar', 'sm')}Reprogramar</button>` : ''}
           ${a.status === 'por_confirmar' ? `<button class="btn sm ghost" data-act="remind-one" data-id="${a.id}">${ic('bell', 'sm')}Recordar por WhatsApp</button>` : ''}
           ${!['cancelado', 'atendido'].includes(a.status) ? `<button class="btn sm danger" data-act="appt-status" data-id="${a.id}" data-s="cancelado">Cancelar turno</button>` : ''}
         </div>`;
@@ -715,21 +863,28 @@
   }
 
   function newApptSheet(pre = {}) {
-    UI.form = { patientId: pre.patientId || '', nuevoNombre: '', nuevoCob: 'Particular', servicio: pre.servicio || 'consulta', prof: pre.prof || '', date: pre.date || tk(), start: pre.start != null ? +pre.start : null, slotProf: pre.prof || null };
-    openSheet('Nuevo turno', () => {
+    const editing = pre.editId ? appt(pre.editId) : null;
+    UI.form = { patientId: pre.patientId || '', nuevoNombre: '', nuevoCob: 'Particular', servicio: pre.servicio || 'consulta', prof: pre.prof || '', date: pre.date || tk(), start: pre.start != null ? +pre.start : null, slotProf: pre.prof || null,
+      editId: editing?.id || null, originalStatus: editing?.status || null, originalSource: editing?.source || null };
+    if (editing) Object.assign(UI.form, { patientId: editing.patientId, servicio: editing.servicio, prof: editing.prof, date: editing.date, start: editing.start, slotProf: editing.prof });
+    openSheet(editing ? 'Reprogramar turno' : 'Nuevo turno', () => {
       const f = UI.form;
       const sv = servicio(f.servicio);
-      const slots = findSlots({ servicio: f.servicio, prof: f.prof || null, day: f.date, limit: 40 });
-      if (f.start != null && !slots.some(o => o.start === f.start && (!f.slotProf || o.prof === f.slotProf))) { /* el horario precargado puede no servir para esta prestación */ }
-      return `<div class="field"><label for="f-pat">Paciente</label><select id="f-pat" data-f="patientId"><option value="">— Elegí un paciente —</option><option value="__new" ${f.patientId === '__new' ? 'selected' : ''}>+ Paciente nuevo</option>${S.patients.map(p => `<option value="${p.id}" ${f.patientId === p.id ? 'selected' : ''}>${esc(p.nombre)} · ${esc(p.cob)}</option>`).join('')}</select></div>
+      const slots = findSlots({ servicio: f.servicio, prof: f.prof || null, day: f.date, limit: 100, ignoreApptId: f.editId })
+        .filter(slot => !f.patientId || f.patientId === '__new' || !S.appts.some(a => a.id !== f.editId && a.patientId === f.patientId && a.date === f.date && live(a) && slot.start < a.start + a.dur && a.start < slot.start + sv.dur)).slice(0, 40);
+      const selectedIsValid = f.start != null && slots.some(o => o.start === +f.start && o.prof === f.slotProf);
+      return `${editing ? `<div class="field"><label>Paciente</label><div class="input-like">${esc(patient(f.patientId).nombre)} · ${esc(cobLabel(patient(f.patientId)))}</div></div>` : `<div class="field"><label for="f-pat">Paciente</label><select id="f-pat" data-f="patientId"><option value="">— Elegí un paciente —</option><option value="__new" ${f.patientId === '__new' ? 'selected' : ''}>+ Paciente nuevo</option>${S.patients.map(p => `<option value="${p.id}" ${f.patientId === p.id ? 'selected' : ''}>${esc(p.nombre)} · ${esc(p.cob)}</option>`).join('')}</select></div>`}
         ${f.patientId === '__new' ? `<div class="two"><div class="field"><label>Nombre y apellido</label><input data-f="nuevoNombre" value="${esc(f.nuevoNombre)}" placeholder="Ej.: Ana López"></div><div class="field"><label>Cobertura</label><select data-f="nuevoCob">${Object.keys(D.coberturas).map(k => `<option ${f.nuevoCob === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div></div>` : ''}
         <div class="two"><div class="field"><label>Prestación</label><select data-f="servicio">${D.servicios.map(s => `<option value="${s.id}" ${f.servicio === s.id ? 'selected' : ''}>${s.nombre}</option>`).join('')}</select></div>
         <div class="field"><label>Profesional</label><select data-f="prof"><option value="">Cualquiera</option>${D.profs.filter(p => sv.profs.includes(p.id)).map(p => `<option value="${p.id}" ${f.prof === p.id ? 'selected' : ''}>${p.corto}</option>`).join('')}</select></div></div>
         <div class="field"><label>Día</label><input type="date" data-f="date" value="${f.date}" min="${tk()}"></div>
         <label class="small" style="font-weight:700;color:var(--ink2);display:block;margin-bottom:6px">Horario libre (${sv.dur} min)</label>
-        ${slots.length ? `<div class="slotgrid">${slots.map(o => `<button type="button" class="${f.start === o.start && f.slotProf === o.prof ? 'on' : ''}" data-act="pick-slot" data-t="${o.start}" data-p="${o.prof}" title="${prof(o.prof).corto}">${hhmm(o.start)}${!f.prof ? `<div class="tiny" style="font-weight:600;opacity:.75">${prof(o.prof).ini}</div>` : ''}</button>`).join('')}</div>` : '<div class="empty" style="padding:14px">No hay horarios libres ese día. Probá otro día o profesional.</div>'}
+        ${f.start != null && !selectedIsValid ? '<div class="note warn" role="status" style="margin-bottom:8px">Ese horario ya no está disponible. Elegí otro horario para continuar.</div>' : ''}
+        ${slots.length ? `<div class="slotgrid">${slots.map(o => `<button type="button" class="${selectedIsValid && f.start === o.start && f.slotProf === o.prof ? 'on' : ''}" data-act="pick-slot" data-t="${o.start}" data-p="${o.prof}" title="${prof(o.prof).corto}">${hhmm(o.start)}${!f.prof ? `<div class="tiny" style="font-weight:600;opacity:.75">${prof(o.prof).ini}</div>` : ''}</button>`).join('')}</div>` : '<div class="empty" style="padding:14px">No hay horarios libres ese día. Probá otro día o profesional.</div>'}
         ${(() => { const p = f.patientId && f.patientId !== '__new' ? patient(f.patientId) : null; const cob = p ? p.cob : f.nuevoCob; return `<div class="note" style="margin-top:14px"><b>Qué va a tener que traer (${esc(cob)}):</b> ${esc(A.traerPara(cob, f.servicio).join(' · '))}</div>`; })()}`;
-    }, () => `<button class="btn ghost" data-act="sheet-close">Cancelar</button><button class="btn primary" data-act="save-appt">Guardar turno</button>`);
+    }, () => `<button class="btn ghost" data-act="sheet-close">Cancelar</button><button class="btn primary" data-act="save-appt">${editing ? 'Guardar cambio' : 'Guardar turno'}</button>`);
+    UI.sheet.dirty = false;
+    UI.sheet.confirmClose = after => confirmDiscard(after);
   }
 
   function patientSheet(id) {
@@ -801,12 +956,18 @@
     if (pend.length) toast({ title: `${Math.min(conf, pend.length)} confirmaron${pend.length > 2 ? ', 1 pidió cambiar' : ''}`, text: 'Clara ya actualizó la agenda y le ofreció otros horarios a quien pidió cambiar.', action: 'Ver WhatsApp', fn: () => go('whatsapp') });
   }
   async function runPrecheck() {
-    UI.checking = true; S.prestaciones.forEach(x => { x.checked = false; }); refresh();
-    for (const x of S.prestaciones.filter(x => !x.excluded)) { await sleep(180); x.checked = true; refresh(); }
-    UI.checking = false;
-    const pres = S.prestaciones.filter(x => !x.excluded), bad = pres.filter(x => issuesOf(x).length);
-    log('facturacion', `Revisó ${pres.length} prestaciones antes de presentar: ${pres.length - bad.length} listas y ${bad.length} con faltantes (${money(bad.reduce((s, x) => s + x.monto, 0))} que habrían vuelto como débito)`, bad.length ? 'warn' : 'ok');
-    save(); refresh();
+    if (UI.checking) return;
+    UI.checking = true; refresh(true);
+    try {
+      // One bounded simulated operation, rather than replacing the whole view per row.
+      await sleep(400);
+      const pres = S.prestaciones.filter(x => !x.excluded);
+      pres.forEach(x => { x.checked = true; });
+      const bad = pres.filter(x => issuesOf(x).length);
+      log('facturacion', `Revisó ${pres.length} prestaciones: ${pres.length - bad.length} listas y ${bad.length} con faltantes`, bad.length ? 'warn' : 'ok');
+      save();
+      toast({ title: 'Revisión de demo terminada', text: `${pres.length - bad.length} listas · ${bad.length} con faltantes.` });
+    } finally { UI.checking = false; refresh(true); }
   }
   function fix(id, code, done) {
     const x = S.prestaciones.find(y => y.id === id), p = patient(x.patientId);
@@ -817,23 +978,28 @@
       addMsg(c, { from: 'agent', agent: 'facturacion', text: `Hola ${first(p.nombre)}, te escribimos de ${D.clinic.nombre}. Para presentar a ${x.cob} tu ${servicio(x.servicio).nombre.toLowerCase()} del ${dm(x.fecha)} nos falta ${what}. ¿Podés acercarlo o mandarnos una foto por acá? ¡Gracias!` });
       x[code] = 'pedido';
       log('facturacion', `Le pidió a ${p.nombre} por WhatsApp ${what.split(' (')[0]} que faltaba`, 'info');
-      toast({ title: 'Mensaje enviado al paciente', text: `${p.nombre} · WhatsApp`, action: 'Ver chat', fn: () => { UI.inboxConv = c.id; go('whatsapp'); } });
+      toast({ title: 'Solicitud simulada registrada', text: `${p.nombre} · No se envió un WhatsApp real.`, action: 'Ver chat', fn: () => { UI.inboxConv = c.id; go('whatsapp'); } });
     } else if (code === 'autorizacion' && !done) { x.autorizacion = 'pedido'; log('facturacion', `Preparó el pedido de autorización a ${x.cob} para ${p.nombre}`, 'info'); toast({ title: 'Pedido de autorización armado', text: 'Queda pendiente de respuesta (demo).' }); }
     else { x[code] = code === 'pieza' ? '45' : true; toast({ title: 'Listo', text: 'Faltante resuelto.' }); }
     save(); refresh();
   }
   async function runDebitos() {
-    S.debitos.forEach(d => { d.classified = false; }); refresh();
-    for (const d of S.debitos) { await sleep(260); d.classified = true; refresh(); }
-    const rec = S.debitos.filter(d => DEB[d.cat].rec);
-    log('facturacion', `Ordenó ${S.debitos.length} débitos de ${S.debitosMes}: ${rec.length} se pueden reclamar (${money(rec.reduce((s, d) => s + d.monto, 0))}) y preparó los borradores`, 'ok');
-    save(); refresh();
+    if (UI.checkingDebitos) return;
+    UI.checkingDebitos = true; refresh(true);
+    try {
+      await sleep(400); S.debitos.forEach(d => { d.classified = true; });
+      const rec = S.debitos.filter(d => DEB[d.cat].rec);
+      log('facturacion', `Ordenó ${S.debitos.length} débitos: ${rec.length} reclamables según las reglas de ejemplo`, 'ok');
+      save(); toast({ title: 'Débitos ordenados', text: `${rec.length} borradores disponibles para revisar.` });
+    } finally { UI.checkingDebitos = false; refresh(true); }
   }
   function claimSheet(id) {
     const d = S.debitos.find(x => x.id === id), p = patient(d.patientId), sv = servicio(d.servicio), cat = DEB[d.cat];
     const text = `Señores ${d.cob}:\n\nSolicito la revisión del débito aplicado en la liquidación de ${S.debitosMes} a la prestación "${sv.nombre}" (código ${sv.cod}) del afiliado ${p.nombre} (${p.afiliado || 's/n'}).\n\nMotivo informado: ${d.raw}.\n\nAdjunto ${cat.doc}, con lo que la prestación cumple la norma vigente. Solicito la refacturación de ${money(d.monto)}.\n\nSaludos cordiales,\nDra. Lucía Méndez · ${D.clinic.nombre}`;
-    openSheet('Borrador del reclamo', () => `<div class="note" style="margin-bottom:12px">El agente arma el borrador. Una persona lo revisa, adjunta el documento y lo presenta por el canal del círculo o de la obra social.</div><div class="field"><label>Texto</label><textarea style="height:300px">${esc(text)}</textarea></div><div class="small muted">Adjuntar: ${esc(cat.doc)}</div>`,
+    UI.claimDraft = d.reclamo || text;
+    openSheet('Borrador del reclamo', () => `<div class="note" style="margin-bottom:12px">Borrador de demostración. Revisarlo y aprobarlo acá no lo envía a la obra social.</div><div class="field"><label for="claim-text">Texto</label><textarea id="claim-text" style="height:300px">${esc(UI.claimDraft)}</textarea></div><div class="small muted">Adjuntar: ${esc(cat.doc)}</div>`,
       () => `<button class="btn ghost" data-act="sheet-close">Cerrar</button><button class="btn primary" data-act="claim-ok" data-id="${d.id}">${ic('check', 'sm')}Aprobar reclamo</button>`);
+    UI.sheet.confirmClose = confirmDiscard;
   }
 
   /* ---------- Toasts ---------- */
@@ -851,11 +1017,24 @@
     const el = e.target.closest('[data-act]'); if (!el) return;
     const d = el.dataset, act = d.act;
     switch (act) {
+      case 'draft-keep': keepDraft(); break;
+      case 'draft-discard': {
+        const saved = UI.discard; UI.discard = null;
+        closeSheet(true); UI.form = null;
+        if (saved?.after) saved.after();
+        if (!UI.sheet && !$('#phonedock').classList.contains('open')) restoreFocus('sheet');
+        break;
+      }
+      case 'menu-open': setMenu(true); break;
+      case 'menu-close': setMenu(false); break;
       case 'go': go(d.page); break;
       case 'more':
         openSheet('Más', () => `<div class="list card">${['obras', 'agentes', 'finanzas', 'config'].map(p => `<button class="row tap" data-act="go" data-page="${p}">${ic(PAGES[p][1])}<div class="grow"><div class="title">${PAGES[p][0]}</div></div>${ic('chevR', 'sm')}</button>`).join('')}</div><button class="btn block" style="margin-top:12px;background:#25d366;color:#063d1d" data-act="phone-open">${ic('phone')}Probar WhatsApp como paciente</button>`);
         break;
-      case 'phone-open': closeSheet(); openPhone(d.say); break;
+      case 'phone-open':
+        if (UI.sheet?.dirty && UI.sheet.confirmClose) UI.sheet.confirmClose(() => { closeSheet(true); openPhone(d.say); });
+        else { closeSheet(true); openPhone(d.say); }
+        break;
       case 'phone-close': closePhone(); break;
       case 'phone-reset': {
         const c = convByTel(persona().tel);
@@ -867,15 +1046,27 @@
       case 'appt': apptSheet(d.id); break;
       case 'patient': closePhoneIfMobile(); patientSheet(d.id); break;
       case 'new-appt': newApptSheet({ date: d.k, start: d.t, prof: d.p, patientId: d.pid }); if (d.t != null) { UI.form.start = +d.t; UI.form.slotProf = d.p; UI.form.prof = d.p || ''; paintSheetForce(); } break;
-      case 'pick-slot': UI.form.start = +d.t; UI.form.slotProf = d.p; paintSheetForce(); break;
+      case 'reprogram-appt': { const a = appt(d.id); if (a) newApptSheet({ editId: a.id }); break; }
+      case 'pick-slot': UI.form.start = +d.t; UI.form.slotProf = d.p; if (UI.sheet) UI.sheet.dirty = true; paintSheetForce(); break;
       case 'save-appt': saveAppt(); break;
+      case 'confirm-cancel-appt': {
+        const a = appt(d.id); if (!a || a.status === 'cancelado') { closeSheet(true); refresh(); break; }
+        const p = patient(a.patientId), prev = a.status;
+        updateAppt(a.id, { status: 'cancelado' });
+        log('persona', `${prev === 'pendiente' ? 'Recepción rechazó' : 'Recepción canceló'} el turno de ${p.nombre} del ${dayRel(a.date)} ${hhmm(a.start)}`, 'info');
+        save(); closeSheet(true); refresh(); toast({ title: prev === 'pendiente' ? 'Turno rechazado' : 'Turno cancelado', text: `${p.nombre} · ${hhmm(a.start)}` }); break;
+      }
       case 'appt-status': {
-        const a = appt(d.id), prev = a.status; updateAppt(d.id, { status: d.s });
+        const a = appt(d.id); if (!a) break;
+        if (d.s === 'cancelado') {
+          const rejected = a.status === 'pendiente';
+          openSheet(rejected ? 'Rechazar turno' : 'Cancelar turno', () => `<p>¿Querés ${rejected ? 'rechazar' : 'cancelar'} el turno de <b>${esc(patient(a.patientId).nombre)}</b>?</p><p class="small muted">${dayTitle(a.date)} · ${hhmm(a.start)} · ${esc(prof(a.prof).corto)}</p>`, () => `<button class="btn ghost" data-act="sheet-close">Volver</button><button class="btn danger" data-act="confirm-cancel-appt" data-id="${a.id}">${rejected ? 'Rechazar turno' : 'Cancelar turno'}</button>`);
+          break;
+        }
+        const prev = a.status; updateAppt(d.id, { status: d.s });
         const p = patient(a.patientId);
         if (prev === 'pendiente' && d.s === 'confirmado') { const c = convByTel(p.tel); if (c) addMsg(c, { from: 'staff', text: `¡Listo ${first(p.nombre)}! Tu turno del ${dayLong(a.date)} a las ${hhmm(a.start)} quedó confirmado. Te esperamos.` }); log('persona', `Recepción aprobó el turno de ${p.nombre} y Clara le avisó por WhatsApp`, 'ok'); }
-        if (d.s === 'cancelado') log('persona', `Recepción canceló el turno de ${p.nombre} del ${dayRel(a.date)} ${hhmm(a.start)}`, 'info');
         save(); refresh(); toast({ title: STATUS[d.s][1], text: `${p.nombre} · ${hhmm(a.start)}` });
-        if (d.s === 'cancelado') closeSheet();
         break;
       }
       case 'traer': { const a = appt(d.id), i = +d.i; a.traerOk = a.traerOk.includes(i) ? a.traerOk.filter(x => x !== i) : a.traerOk.concat(i); save(); paintSheetForce(); break; }
@@ -892,15 +1083,37 @@
       case 'run-reminders': runReminders(); break;
       case 'run-precheck': runPrecheck(); break;
       case 'fix': fix(d.id, d.code, d.done === '1'); break;
-      case 'build-batch': log('facturacion', 'Armó el lote para presentar (archivo en el formato del círculo, simulado)', 'ok'); save(); refresh(); toast({ title: 'Lote armado', text: 'En el producto real se descarga en el formato que pide cada obra social o círculo.' }); break;
+      case 'build-batch': {
+        const ready = S.prestaciones.filter(x => !x.excluded && x.checked && !issuesOf(x).length);
+        if (!ready.length || UI.checking) { toast({ title: 'No hay prestaciones listas', text: 'Revisá y resolvé los faltantes antes de continuar.', warn: true }); break; }
+        S.flags.lastBatch = { ids: ready.map(x => x.id), created: Date.now(), total: ready.reduce((sum, x) => sum + x.monto, 0) };
+        log('facturacion', `Preparó un lote de demo con ${ready.length} prestaciones sin faltantes`, 'ok'); save();
+        toast({ title: 'Lote de demo preparado', text: `${ready.length} prestaciones. No se enviaron datos ni se generó un archivo real.` });
+        break;
+      }
       case 'run-debitos': runDebitos(); break;
-      case 'os-tab': UI.osTab = d.t; render(); break;
+      case 'os-tab': UI.osTab = d.t; UI.osFilter = 'all'; UI.osQuery = ''; render(); break;
       case 'claim': claimSheet(d.id); break;
-      case 'claim-ok': { const x = S.debitos.find(y => y.id === d.id); x.estado = 'enviado'; log('persona', `Recepción aprobó el reclamo del débito de ${patient(x.patientId).nombre}`, 'ok'); save(); closeSheet(); refresh(); toast({ title: 'Reclamo aprobado', text: 'Listo para presentar.' }); break; }
+      case 'claim-ok': {
+        const x = S.debitos.find(y => y.id === d.id);
+        const draft = ($('#claim-text')?.value || UI.claimDraft || '').trim();
+        if (!draft) { toast({ title: 'El reclamo está vacío', text: 'Escribí el texto antes de aprobarlo.', warn: true }); $('#claim-text')?.focus(); break; }
+        x.reclamo = draft; x.estado = 'enviado'; if (UI.sheet) UI.sheet.dirty = false;
+        log('persona', `Recepción aprobó el borrador del reclamo de ${patient(x.patientId).nombre}`, 'ok');
+        save(); closeSheet(); refresh(); toast({ title: 'Borrador aprobado en demo', text: 'Se guardó en este navegador. No fue enviado.' }); break;
+      }
       case 'charge': { const x = S.debitos.find(y => y.id === d.id); if (x.estado !== 'cobrar') { x.estado = 'cobrar'; const p = patient(x.patientId); const c = convFor(p.tel, p.id, p.nombre); addMsg(c, { from: 'agent', agent: 'facturacion', text: `Hola ${first(p.nombre)}, ${x.cob} no reconoció tu ${servicio(x.servicio).nombre.toLowerCase()} (${DEB[x.cat].label.toLowerCase()}). Te queda un saldo de ${money(x.monto)}. Si querés lo vemos en tu próxima visita o te pasamos un link de pago.` }); log('facturacion', `Le avisó a ${p.nombre} el saldo por un débito no recuperable`, 'info'); save(); refresh(); } break; }
       case 'toggle-agent': S.cfg.agents[d.id] = !S.cfg.agents[d.id]; save(); render(); break;
       case 'toggle-auto': S.cfg.autoConfirm = !S.cfg.autoConfirm; save(); render(); break;
-      case 'reset-demo': if (confirmReset()) { try { localStorage.removeItem(LS); } catch (e) { } S = seed(); save(); UI.inboxConv = null; closePhone(); go('hoy'); toast({ title: 'Demo reiniciada', text: 'Todo volvió al estado inicial.' }); } break;
+      case 'reset-demo':
+        openSheet('¿Reiniciar la demo?', () => '<p>Se borrarán los cambios de esta demo guardados en este navegador. No se puede deshacer.</p>',
+          () => '<button class="btn ghost" data-act="sheet-close">Cancelar</button><button class="btn danger" data-act="reset-demo-confirm">Reiniciar demo</button>');
+        break;
+      case 'reset-demo-confirm':
+        closeSheet(true); try { localStorage.removeItem(LS); } catch (e) { }
+        S = seed(); save(); UI.inboxConv = null; UI.patientQuery = ''; UI.osQuery = ''; UI.osFilter = 'all'; UI.form = null;
+        closePhone(); go('hoy'); toast({ title: 'Demo reiniciada', text: 'Todo volvió al estado inicial.' });
+        break;
       case 'summary': { const p = patient(d.id); UI.summary = summaryHTML(p); log('historia', `Resumió a ${p.nombre} antes del turno`, 'info'); save(); paintSheetForce(); break; }
       case 'dict-start': UI.dict = { pid: d.id, text: DICT_EX, result: null }; paintSheetForce(); break;
       case 'dict-cancel': UI.dict = null; paintSheetForce(); break;
@@ -908,23 +1121,26 @@
       case 'dict-sign': { const p = patient(UI.dict.pid), r = UI.dict.result; p.evols.push({ id: uid(), fecha: tk(), prof: 'mendez', firmado: true, motivo: r.motivo, hallazgos: r.hallazgos, procedimiento: r.procedimiento, indicaciones: r.indicaciones, proximo: r.proximo }); if (r.pieza) { p.odonto.mark = p.odonto.mark.filter(n => n !== r.pieza); if (!p.odonto.done.includes(r.pieza)) p.odonto.done.push(r.pieza); } UI.dict = null; log('persona', `La Dra. Méndez firmó una evolución de ${p.nombre}`, 'ok'); save(); paintSheetForce(); toast({ title: 'Evolución firmada', text: p.nombre }); break; }
     }
   });
-  function confirmReset() { return true; }
   function closePhoneIfMobile() { if (!matchMedia('(min-width: 900px)').matches) closePhone(); }
   function paintSheetForce() { if (UI.sheet) { UI.sheet.force = true; paintSheet(); } }
 
   document.addEventListener('change', e => {
+    if (e.target.id === 'os-filter') { UI.osFilter = e.target.value; render(); }
     const f = e.target.dataset && e.target.dataset.f;
     if (f && UI.form) {
       UI.form[f] = e.target.value;
-      if (f === 'servicio') { const sv = servicio(UI.form.servicio); if (UI.form.prof && !sv.profs.includes(UI.form.prof)) UI.form.prof = ''; UI.form.start = null; }
-      if (f === 'prof' || f === 'date') UI.form.start = null;
+      if (UI.sheet) UI.sheet.dirty = true;
+      if (f === 'servicio') { const sv = servicio(UI.form.servicio); if (UI.form.prof && !sv.profs.includes(UI.form.prof)) UI.form.prof = ''; UI.form.start = null; UI.form.slotProf = null; }
+      if (f === 'prof' || f === 'date') { UI.form.start = null; UI.form.slotProf = null; }
       paintSheetForce();
     }
     if (e.target.id === 'ph-persona') { S.persona = e.target.value; save(); renderPhone(); }
   });
   document.addEventListener('input', e => {
-    if (e.target.id === 'psearch') { const q = A.norm(e.target.value); document.querySelectorAll('#plist [data-name]').forEach(r => { r.style.display = A.norm(r.dataset.name).includes(q) ? '' : 'none'; }); }
-    if (e.target.dataset && e.target.dataset.f === 'nuevoNombre' && UI.form) UI.form.nuevoNombre = e.target.value;
+    if (e.target.id === 'psearch') { UI.patientQuery = e.target.value; filterPatients(); }
+    if (e.target.id === 'os-search') { UI.osQuery = e.target.value; render(); }
+    if (e.target.id === 'claim-text') { UI.claimDraft = e.target.value; if (UI.sheet) UI.sheet.dirty = true; }
+    if (e.target.dataset && e.target.dataset.f === 'nuevoNombre' && UI.form) { UI.form.nuevoNombre = e.target.value; if (UI.sheet) UI.sheet.dirty = true; }
   });
   document.addEventListener('submit', e => {
     if (e.target.id === 'ph-form') { e.preventDefault(); const i = $('#ph-input'); const t = i.value; i.value = ''; sendFromPhone(t); }
@@ -935,21 +1151,152 @@
       renderPhone(); renderNav();
     }
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (UI.sheet) closeSheet(); else closePhone(); } });
+  document.addEventListener('keydown', e => {
+    const overlay = UI.sheet ? $('#sheet') : document.body.classList.contains('menu-open') ? $('.sidebar') :
+      $('#phonedock').classList.contains('open') && phoneIsModal.matches ? $('.phone') : null;
+    if (e.key === 'Escape') {
+      if (UI.sheet) closeSheet();
+      else if (document.body.classList.contains('menu-open')) setMenu(false);
+      else closePhone();
+    }
+    if (e.key !== 'Tab' || !overlay) return;
+    const controls = [...overlay.querySelectorAll('button,input,select,textarea,a[href],[tabindex="0"]')]
+      .filter(x => !x.disabled && x.getClientRects().length);
+    const first = controls[0], last = controls[controls.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) {
+      e.preventDefault(); last?.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !overlay.contains(document.activeElement))) {
+      e.preventDefault(); first?.focus();
+    }
+  });
+
+  /* ---------- Accesibilidad de navegación, hojas y tablas ---------- */
+  const returnFocus = {};
+  const mobileMenu = matchMedia('(max-width: 899px)');
+  const phoneIsModal = matchMedia('(max-width: 1179px)');
+  function focusViewHeading() {
+    const heading = $('#view h1');
+    if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+  }
+  function restoreFocus(kind) {
+    const target = returnFocus[kind];
+    if (target?.isConnected && !target.closest('[inert]') && target.getClientRects().length) target.focus({ preventScroll: true });
+    else focusViewHeading();
+  }
+  function setMenu(open, restore = true) {
+    open = open && mobileMenu.matches;
+    const wasOpen = document.body.classList.contains('menu-open');
+    document.body.classList.toggle('menu-open', open);
+    $('.menu-toggle').setAttribute('aria-expanded', String(open));
+    syncOverlays();
+    if (open) $('.menu-close').focus({ preventScroll: true });
+    else if (wasOpen && restore) $('.menu-toggle').focus({ preventScroll: true });
+  }
+  function syncOverlays() {
+    updateVisibleViewport();
+    const sheet = !!UI.sheet;
+    const menu = document.body.classList.contains('menu-open');
+    const phoneOpen = $('#phonedock').classList.contains('open');
+    const phoneModal = phoneOpen && phoneIsModal.matches;
+    $('.app').inert = sheet || phoneModal;
+    $('main').inert = menu;
+    $('.sidebar').inert = mobileMenu.matches && !menu;
+    $('#bottomnav').inert = sheet || menu || phoneModal;
+    $('.fab').inert = sheet || menu || phoneModal;
+    $('#phonedock').inert = !phoneOpen || sheet || menu;
+    $('#sheet').inert = !sheet;
+    document.body.classList.toggle('overlay-lock', sheet || menu || phoneModal);
+    if (menu) { $('.sidebar').setAttribute('role', 'dialog'); $('.sidebar').setAttribute('aria-modal', 'true'); }
+    else { $('.sidebar').removeAttribute('role'); $('.sidebar').removeAttribute('aria-modal'); }
+    if (phoneModal) $('.phone').setAttribute('aria-modal', 'true');
+    else $('.phone').removeAttribute('aria-modal');
+  }
+  function enhanceContent(root) {
+    root.querySelectorAll('.field').forEach((field, index) => {
+      const label = field.querySelector('label'), control = field.querySelector('input,select,textarea');
+      if (!label || !control) return;
+      control.id ||= (root.closest('#sheet') ? 'sheet-field-' : 'view-field-') + (control.dataset.f || index);
+      label.htmlFor = control.id;
+    });
+    root.querySelectorAll('.toggle').forEach(button => button.setAttribute('aria-pressed', String(button.classList.contains('on'))));
+    root.querySelectorAll('.seg button,.fchip,.daychip').forEach(button => button.setAttribute('aria-pressed', String(button.classList.contains('on'))));
+    const staffInput = root.querySelector('#staffinput');
+    if (staffInput) staffInput.setAttribute('aria-label', 'Mensaje de recepción');
+    root.querySelectorAll('.tablewrap').forEach((wrapper, index) => {
+      const overflow = wrapper.scrollWidth > wrapper.clientWidth + 1;
+      wrapper.tabIndex = overflow ? 0 : -1;
+      wrapper.setAttribute('role', 'region');
+      wrapper.setAttribute('aria-label', 'Tabla de datos de ' + PAGES[UI.page][0]);
+      let hint = wrapper.previousElementSibling;
+      if (!hint?.classList.contains('table-hint')) {
+        hint = document.createElement('p'); hint.className = 'table-hint';
+        hint.id = 'table-hint-' + UI.page + '-' + index;
+        hint.textContent = 'Deslizá para ver todas las columnas. Con teclado, usá las flechas.';
+        wrapper.before(hint);
+      }
+      hint.hidden = !overflow;
+      wrapper.setAttribute('aria-describedby', hint.id);
+    });
+  }
+  mobileMenu.addEventListener('change', () => setMenu(false, false));
+  phoneIsModal.addEventListener('change', syncOverlays);
+  window.addEventListener('resize', () => { enhanceContent($('#view')); if (UI.sheet) enhanceContent($('#sheet-inner')); });
+  function updateVisibleViewport() {
+    const visible = window.visualViewport;
+    const height = visible?.height || innerHeight;
+    const top = visible?.offsetTop || 0;
+    const inset = Math.max(0, innerHeight - height - top);
+    const root = document.documentElement.style;
+    root.setProperty('--visual-height', height + 'px');
+    root.setProperty('--visual-top', top + 'px');
+    root.setProperty('--keyboard-inset', inset + 'px');
+    document.body.classList.toggle('keyboard-open', inset > 100);
+  }
+  window.visualViewport?.addEventListener('resize', updateVisibleViewport);
+  window.visualViewport?.addEventListener('scroll', updateVisibleViewport);
+  window.addEventListener('resize', updateVisibleViewport);
 
   function saveAppt() {
     const f = UI.form;
-    if (!f.patientId) return toast({ title: 'Falta elegir el paciente', warn: true });
-    if (f.patientId === '__new' && f.nuevoNombre.trim().split(/\s+/).length < 2) return toast({ title: 'Escribí nombre y apellido', warn: true });
-    if (f.start == null || !f.slotProf) return toast({ title: 'Elegí un horario', warn: true });
-    let p = f.patientId === '__new' ? upsertPatient({ nombre: f.nuevoNombre.trim(), tel: '+54 9 341 555-0' + Math.floor(100 + Math.random() * 900), cob: f.nuevoCob, afiliado: '', alergias: '' }) : patient(f.patientId);
-    if (f.patientId === '__new') p.nuevo = false;
-    const sv = servicio(f.servicio);
-    const a = createAppt({ patientId: p.id, prof: f.slotProf, servicio: sv.id, date: f.date, start: f.start, dur: sv.dur, status: 'por_confirmar', source: 'recepcion', traer: A.traerPara(p.cob, sv.id) });
-    log('persona', `Recepción agendó a ${p.nombre}: ${sv.nombre} el ${dayRel(a.date)} ${hhmm(a.start)}`, 'info');
-    closeSheet(); UI.highlight = a.id; UI.agendaDay = a.date; save();
+    if (!f) return;
+    const fail = (title, detail) => { if (detail) toast({ title, text: detail, warn: true }); else toast({ title, warn: true }); paintSheetForce(); };
+    const editing = f.editId ? appt(f.editId) : null;
+    if (f.editId && (!editing || editing.status === 'cancelado' || editing.status === 'atendido')) return fail('Este turno ya no se puede reprogramar');
+    if (!f.patientId || (f.patientId !== '__new' && !S.patients.some(p => p.id === f.patientId))) return fail('Falta elegir un paciente');
+    if (f.patientId === '__new' && f.nuevoNombre.trim().split(/\s+/).length < 2) return fail('Escribí nombre y apellido');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date || '') || key(fromKey(f.date)) !== f.date) return fail('Elegí una fecha válida');
+    if (f.date < tk()) return fail('La fecha ya pasó');
+    const sv = servicio(f.servicio), start = Number(f.start), dur = sv.dur, chosenProf = f.slotProf;
+    if (!Number.isInteger(start) || !chosenProf) return fail('Elegí un horario');
+    if (!sv.profs.includes(chosenProf) || (f.prof && f.prof !== chosenProf)) return fail('Ese profesional no realiza la prestación');
+    const profData = D.profs.find(p => p.id === chosenProf), day = fromKey(f.date);
+    if (!profData || !profData.dias.includes(day.getDay())) return fail('Ese profesional no atiende ese día');
+    if (f.date === tk() && start < nowMin() + 30) return fail('Ese horario ya pasó o es demasiado próximo');
+    const offered = findSlots({ servicio: sv.id, prof: chosenProf, day: f.date, limit: 100, ignoreApptId: f.editId });
+    const stillAvailable = offered.some(slot => slot.start === start && slot.prof === chosenProf);
+    if (!stillAvailable) return fail('Ese horario ya no está disponible', 'La agenda cambió. Elegí otro horario para continuar.');
+    const collision = S.appts.some(a => a.id !== f.editId && a.prof === chosenProf && a.date === f.date && live(a) && start < a.start + a.dur && a.start < start + dur);
+    if (collision) return fail('El horario se superpone con otro turno', 'Elegí otro horario disponible.');
+    const patientCollision = f.patientId !== '__new' && S.appts.some(a => a.id !== f.editId && a.patientId === f.patientId && a.date === f.date && live(a) && start < a.start + a.dur && a.start < start + dur);
+    if (patientCollision) return fail('El paciente ya tiene un turno a esa hora', 'Elegí un horario que no se superponga con su otra consulta.');
+
+    let p = editing ? patient(editing.patientId) : f.patientId === '__new' ? upsertPatient({ nombre: f.nuevoNombre.trim(), tel: '+54 9 341 555-0' + Math.floor(100 + Math.random() * 900), cob: f.nuevoCob, afiliado: '', alergias: '' }) : patient(f.patientId);
+    if (!editing && f.patientId === '__new') p.nuevo = false;
+    let a;
+    if (editing) {
+      const patch = { prof: chosenProf, servicio: sv.id, date: f.date, start, dur };
+      if (editing.servicio !== sv.id) { patch.traer = A.traerPara(p.cob, sv.id); patch.traerOk = []; }
+      a = updateAppt(editing.id, patch);
+      log('persona', `Recepción reprogramó el turno de ${p.nombre}: ${sv.nombre} el ${dayRel(a.date)} ${hhmm(a.start)}`, 'info', a.id);
+    } else {
+      a = createAppt({ patientId: p.id, prof: chosenProf, servicio: sv.id, date: f.date, start, dur, status: 'por_confirmar', source: 'recepcion', traer: A.traerPara(p.cob, sv.id) });
+      log('persona', `Recepción agendó a ${p.nombre}: ${sv.nombre} el ${dayRel(a.date)} ${hhmm(a.start)}`, 'info', a.id);
+    }
+    if (UI.sheet) UI.sheet.dirty = false;
+    closeSheet(true); UI.highlight = a.id; UI.agendaDay = a.date; save();
     if (UI.page !== 'agenda') go('agenda'); else render();
-    toast({ title: 'Turno guardado', text: `${p.nombre} · ${dayRel(a.date)} ${hhmm(a.start)}. Clara le va a mandar el recordatorio.` });
+    toast({ title: editing ? 'Turno reprogramado' : 'Turno guardado', text: `${p.nombre} · ${dayRel(a.date)} ${hhmm(a.start)}${editing ? '' : '. Clara le va a mandar el recordatorio.'}` });
+    focusViewHeading();
   }
   function summaryHTML(p) {
     const last = p.evols[p.evols.length - 1];
@@ -972,6 +1319,6 @@
   history.replaceState(null, '', '#' + UI.page);
   render();
   matchMedia('(min-width: 900px)').addEventListener('change', () => render());
-  setInterval(() => { if (UI.page === 'hoy' || UI.page === 'agenda') { const ae = document.activeElement; if (!(ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) { const y = window.scrollY; render(); window.scrollTo(0, y); } } }, 60000);
+  setInterval(() => { if (document.hidden || UI.sheet || document.body.classList.contains('menu-open')) return; if (UI.page === 'hoy' || UI.page === 'agenda') { const ae = document.activeElement; if (!(ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) { const y = window.scrollY; render(); window.scrollTo(0, y); } } }, 60000);
   window.Clara = { state: () => S, ui: UI, incoming, findSlots, reset: () => { localStorage.removeItem(LS); location.reload(); } };
 })();

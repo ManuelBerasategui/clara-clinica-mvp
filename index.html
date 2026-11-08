@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0a7d76">
 <title>Clara · Clínica dental</title>
 <meta name="description" content="Prototipo de Clara: gestión de clínica dental con agentes de IA para WhatsApp, coberturas y facturación. Datos ficticios.">
@@ -12,8 +12,10 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<div class="nav-backdrop" data-act="menu-close" aria-hidden="true"></div>
 <div class="app">
-  <aside class="sidebar" aria-label="Menú principal">
+  <aside class="sidebar" id="navigation" aria-label="Menú principal">
+    <button class="btn ghost menu-close" data-act="menu-close">Cerrar menú ✕</button>
     <div class="brand"><div class="brandmark" data-icon="tooth"></div><div>clara<small>Clínica Dental Centro</small></div></div>
     <nav class="nav" id="sidenav"></nav>
     <div class="side-foot">
@@ -23,6 +25,7 @@
   </aside>
   <main>
     <header class="topbar">
+      <button class="btn ghost menu-toggle" data-act="menu-open" aria-controls="navigation" aria-expanded="false">☰ Menú</button>
       <div class="brand"><div class="brandmark" data-icon="tooth"></div><div>clara</div></div>
       <div class="crumb">Clínica Dental Centro <span style="padding:0 7px;color:#c3cccd">/</span> <b id="crumb">Hoy</b></div>
       <div class="topspacer"></div>
@@ -45,8 +48,8 @@
       <div style="flex:1;min-width:0"><b>Clínica Dental Centro</b><span id="ph-status">en línea · responde Clara (IA)</span></div>
       <button class="iconbtn" data-act="phone-reset" aria-label="Reiniciar esta conversación"><span data-icon="refresh"></span></button>
     </div>
-    <div class="ph-persona"><span>Escribís como</span><select id="ph-persona"></select></div>
-    <div class="ph-msgs" id="ph-msgs"></div>
+    <div class="ph-persona"><label for="ph-persona">Escribís como</label><select id="ph-persona"></select></div>
+    <div class="ph-msgs" id="ph-msgs" role="log" aria-label="Mensajes del simulador"></div>
     <div class="ph-sugg" id="ph-sugg"></div>
     <form class="ph-foot" id="ph-form" autocomplete="off">
       <input id="ph-input" placeholder="Escribí como si fueras el paciente…" aria-label="Mensaje del paciente">
@@ -56,7 +59,7 @@
 </div>
 
 <div class="sheet-bg" id="sheetbg" data-act="sheet-close"></div>
-<section class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="grab"></div><div id="sheet-inner"></div></section>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1"><div class="grab"></div><div id="sheet-inner"></div></section>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="data.js"></script>
